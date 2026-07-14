@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { Server, type Socket } from "socket.io";
 import { db, getUserById, publicUser, type UserRow } from "./db";
-import { createSession, endSessionToken, loginEmail, loginGoogle, register, resumeSession } from "./auth";
+import { verifySupabaseToken } from "./auth";
 
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -111,7 +111,6 @@ function rollOnce(minRarity?: Rarity) {
 const setCoins = db.prepare("UPDATE users SET coins = ? WHERE id = ?");
 const setVip = db.prepare("UPDATE users SET vip = 1 WHERE id = ?");
 const setDaily = db.prepare("UPDATE users SET last_daily = ?, coins = ? WHERE id = ?");
-const setAvatar = db.prepare("UPDATE users SET avatar = ? WHERE id = ?");
 const addInventory = db.prepare("INSERT INTO inventory (user_id, name, icon, rarity) VALUES (?, ?, ?, ?)");
 const listInventory = db.prepare("SELECT name, icon, rarity FROM inventory WHERE user_id = ?");
 
@@ -226,12 +225,11 @@ io.on("connection", (socket: Socket) => {
     return user;
   };
 
-  function authOk(u: UserRow, ack: any, token?: string) {
+  function authOk(u: UserRow, ack: any) {
     user = u;
     online.set(socket.id, u.id);
     broadcastPresence();
     ack?.({
-      token: token ?? null,
       user: publicUser(u),
       coins: u.coins,
       vip: !!u.vip,
@@ -241,33 +239,13 @@ io.on("connection", (socket: Socket) => {
 
   // --- auth ----------------------------------------------------------------
 
-  socket.on("auth:register", ({ email, password, nickname, avatar }, ack) => {
-    const res = register(String(email ?? ""), String(password ?? ""), String(nickname ?? ""), String(avatar ?? "🙂"));
+  socket.on("auth:supabase", async ({ accessToken, nickname, avatar }, ack) => {
+    const res = await verifySupabaseToken(String(accessToken ?? ""), {
+      nickname: nickname ? String(nickname) : undefined,
+      avatar: avatar ? String(avatar) : undefined,
+    });
     if ("error" in res) return ack?.({ error: res.error });
-    if (avatar) setAvatar.run(String(avatar), res.user.id);
-    authOk(getUserById.get(res.user.id)!, ack, createSession(res.user.id));
-  });
-
-  socket.on("auth:login", ({ email, password }, ack) => {
-    const res = loginEmail(String(email ?? ""), String(password ?? ""));
-    if ("error" in res) return ack?.({ error: res.error });
-    authOk(res.user, ack, createSession(res.user.id));
-  });
-
-  socket.on("auth:google", async ({ idToken }, ack) => {
-    const res = await loginGoogle(String(idToken ?? ""));
-    if ("error" in res) return ack?.({ error: res.error });
-    authOk(res.user, ack, createSession(res.user.id));
-  });
-
-  socket.on("auth:resume", ({ token }, ack) => {
-    const u = resumeSession(String(token ?? ""));
-    if (!u) return ack?.({ error: "Session expired — please sign in again" });
-    authOk(u, ack);
-  });
-
-  socket.on("auth:logout", ({ token }) => {
-    if (token) endSessionToken(String(token));
+    authOk(res.user, ack);
   });
 
   // --- matchmaking (random chat / random call) -------------------------------

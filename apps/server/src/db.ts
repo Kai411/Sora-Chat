@@ -9,19 +9,13 @@ db.pragma("journal_mode = WAL");
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY,
+    supabase_id TEXT,
     email TEXT UNIQUE,
-    password_hash TEXT,
-    google_id TEXT UNIQUE,
     nickname TEXT NOT NULL,
     avatar TEXT NOT NULL DEFAULT '🙂',
     coins INTEGER NOT NULL DEFAULT 1000,
     vip INTEGER NOT NULL DEFAULT 0,
     last_daily INTEGER NOT NULL DEFAULT 0,
-    created INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
     created INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS follows (
@@ -59,11 +53,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_dms_recipient ON dms (recipient, read);
 `);
 
+// Migrate pre-Supabase dev databases in place (throwaway data, but don't crash).
+try {
+  db.exec("ALTER TABLE users ADD COLUMN supabase_id TEXT");
+} catch {}
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users (supabase_id)");
+
 export interface UserRow {
   id: number;
+  supabase_id: string | null;
   email: string | null;
-  password_hash: string | null;
-  google_id: string | null;
   nickname: string;
   avatar: string;
   coins: number;
@@ -77,7 +76,6 @@ export function publicUser(u: UserRow) {
 
 export const getUserById = db.prepare<[number], UserRow>("SELECT * FROM users WHERE id = ?");
 export const getUserByEmail = db.prepare<[string], UserRow>("SELECT * FROM users WHERE email = ?");
-export const getUserByGoogleId = db.prepare<[string], UserRow>("SELECT * FROM users WHERE google_id = ?");
 
 // Seed a handful of authors + posts so the feed isn't empty on first run.
 if ((db.prepare("SELECT COUNT(*) c FROM posts").get() as any).c === 0) {

@@ -20,8 +20,8 @@ Open http://localhost:5173. To test social features solo, create a **second acco
 
 | Feature | Status |
 |---|---|
-| Accounts | ✅ email+password (scrypt) + session tokens, SQLite-persisted |
-| Google login | ✅ wired, shown when `GOOGLE_CLIENT_ID` / `VITE_GOOGLE_CLIENT_ID` are set |
+| Accounts | ✅ Supabase Auth (email+password, managed sessions, password-reset emails) |
+| Google login | ✅ via Supabase — toggle the Google provider in the Supabase dashboard |
 | Main hub + online users | ✅ live presence; tap a user to DM them |
 | Direct messages | ✅ IG-style: conversation list, unread counts, live delivery, persisted |
 | DM voice calls | ✅ ring / accept / decline flow, WebRTC P2P audio |
@@ -39,12 +39,12 @@ Persistence is **SQLite** (`apps/server/sora.db`, auto-created). Zero installs l
 | Var | Where | Purpose |
 |---|---|---|
 | `VITE_SERVER_URL` | web build (Netlify) | Socket.IO server origin; defaults to same-origin |
-| `VITE_GOOGLE_CLIENT_ID` | web build | shows the Google Sign-In button |
-| `GOOGLE_CLIENT_ID` | server | verifies Google ID tokens (same OAuth client ID) |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | web build | Supabase project URL + anon key (Settings → API) |
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | server | same project; used to verify user access tokens |
 | `DB_PATH` | server | SQLite file location (default `sora.db`) |
 | `PORT` | server | default 3001 |
 
-Google setup: Google Cloud console → create an OAuth 2.0 **Web application** client → add your Netlify domain (and `http://localhost:5173`) to *Authorized JavaScript origins* → use the client ID for both vars above.
+Supabase setup: create a free project at supabase.com → Settings → API gives the URL + anon key (put in all four vars above). For instant signups during development, turn off **Authentication → Sign In / Providers → Email → Confirm email**. For Google login, enable the Google provider in the same screen (that one still needs a Google Cloud OAuth client ID + secret pasted into Supabase, plus Supabase's callback URL registered in Google).
 
 ## Architecture
 
@@ -57,7 +57,7 @@ apps/
     src/views/           one view per feature
   server/   Node + Socket.IO (tsx)
     src/db.ts            SQLite schema + seeds (better-sqlite3)
-    src/auth.ts          scrypt passwords, session tokens, Google token verification
+    src/auth.ts          Supabase access-token verification → local profile row
     src/index.ts         socket handlers: presence, matchmaking, rooms, DMs, feed, gacha
 ```
 
@@ -65,7 +65,7 @@ All traffic uses Socket.IO (acks as RPC). Deploys: web on Netlify (`netlify.toml
 
 ## Roadmap
 
-- **Phase 1 — production backend:** hosted Postgres (or Render persistent disk), rate limiting, moderation basics (block/report — required by app stores for UGC apps), password reset emails.
+- **Phase 1 — production backend:** move app data from SQLite to Supabase Postgres (auth is already Supabase), rate limiting, moderation basics (block/report — required by app stores for UGC apps).
 - **Phase 2 — group audio:** LiveKit SFU for voice rooms; TURN server for NAT-blocked P2P calls.
 - **Phase 3 — Capacitor wrap:** iOS/Android shells, push notifications (FCM/APNs), RevenueCat for gacha/VIP IAP (StoreKit/Play Billing; Stripe stays on web).
 - **Phase 4 — native call polish:** background audio, CallKit/ConnectionService, audio routing.

@@ -28,8 +28,8 @@ async function becomeVip() {
   flash("Welcome to VIP! 👑");
 }
 
-function logout() {
-  app.logout();
+async function logout() {
+  await app.logout();
   router.replace("/login");
 }
 </script>

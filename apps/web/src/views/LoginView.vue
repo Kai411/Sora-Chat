@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
 import { useRouter } from "vue-router";
+import { supabase } from "../lib/supabase";
 import { useAppStore } from "../stores/app";
 
 const AVATARS = ["🦊", "🐰", "🐼", "🐸", "🦄", "🐙", "🐧", "🦋", "🌸", "🍀", "🎧", "🌙"];
-const GOOGLE_CLIENT_ID: string | undefined = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
 const app = useAppStore();
 const router = useRouter();
 
+const configured = !!supabase;
 const mode = ref<"signin" | "signup">("signin");
 const email = ref("");
 const password = ref("");
@@ -16,22 +17,27 @@ const nickname = ref("");
 const avatar = ref(AVATARS[0]);
 const busy = ref(false);
 const error = ref("");
-const googleEl = ref<HTMLElement | null>(null);
+const notice = ref("");
 
 async function submit() {
   if (busy.value) return;
   busy.value = true;
   error.value = "";
+  notice.value = "";
   try {
     if (mode.value === "signup") {
-      await app.register({
+      const result = await app.signUp({
         email: email.value,
         password: password.value,
-        nickname: nickname.value,
+        nickname: nickname.value.trim(),
         avatar: avatar.value,
       });
+      if (result === "confirm") {
+        notice.value = "Almost there — check your inbox and confirm your email, then come back and sign in.";
+        return;
+      }
     } else {
-      await app.login({ email: email.value, password: password.value });
+      await app.signIn({ email: email.value, password: password.value });
     }
     router.replace("/");
   } catch (e: any) {
@@ -41,31 +47,29 @@ async function submit() {
   }
 }
 
-onMounted(() => {
-  if (!GOOGLE_CLIENT_ID) return;
-  const script = document.createElement("script");
-  script.src = "https://accounts.google.com/gsi/client";
-  script.async = true;
-  script.onload = () => {
-    const google = (window as any).google;
-    google.accounts.id.initialize({
-      client_id: GOOGLE_CLIENT_ID,
-      callback: async ({ credential }: { credential: string }) => {
-        error.value = "";
-        try {
-          await app.loginGoogle(credential);
-          router.replace("/");
-        } catch (e: any) {
-          error.value = e?.message ?? "Google sign-in failed";
-        }
-      },
-    });
-    if (googleEl.value) {
-      google.accounts.id.renderButton(googleEl.value, { theme: "filled_black", size: "large", width: 320 });
-    }
-  };
-  document.head.appendChild(script);
-});
+async function google() {
+  error.value = "";
+  try {
+    await app.signInGoogle(); // navigates away on success
+  } catch (e: any) {
+    error.value = e?.message ?? "Google sign-in failed";
+  }
+}
+
+async function forgot() {
+  error.value = "";
+  notice.value = "";
+  if (!email.value) {
+    error.value = "Type your email above first";
+    return;
+  }
+  try {
+    await app.resetPassword(email.value);
+    notice.value = "Password reset email sent — check your inbox.";
+  } catch (e: any) {
+    error.value = e?.message ?? "Could not send the reset email";
+  }
+}
 </script>
 
 <template>
@@ -80,7 +84,12 @@ onMounted(() => {
       <p class="mt-1 text-sm text-white/50">Meet someone new tonight</p>
     </div>
 
-    <div class="w-full space-y-4">
+    <div v-if="!configured" class="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-xs text-amber-200">
+      Auth isn't configured yet: set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>
+      (see <code>apps/web/.env.example</code>), then restart the dev server.
+    </div>
+
+    <div v-else class="w-full space-y-4">
       <div class="flex rounded-full bg-surface p-1 text-sm">
         <button
           v-for="m in [
@@ -90,7 +99,7 @@ onMounted(() => {
           :key="m.id"
           class="flex-1 rounded-full py-1.5 text-white/50"
           :class="mode === m.id && 'bg-surface-2 !text-white'"
-          @click="mode = m.id; error = ''"
+          @click="mode = m.id; error = ''; notice = ''"
         >
           {{ m.label }}
         </button>
@@ -141,13 +150,24 @@ onMounted(() => {
         {{ busy ? "One moment…" : mode === "signup" ? "Create account" : "Sign in" }}
       </button>
 
-      <p v-if="error" class="text-center text-xs text-red-300">{{ error }}</p>
+      <button v-if="mode === 'signin'" class="w-full text-center text-xs text-white/40" @click="forgot">
+        Forgot password?
+      </button>
 
-      <div v-if="GOOGLE_CLIENT_ID" class="pt-1">
+      <p v-if="error" class="text-center text-xs text-red-300">{{ error }}</p>
+      <p v-if="notice" class="text-center text-xs text-emerald-300">{{ notice }}</p>
+
+      <div class="pt-1">
         <div class="mb-3 flex items-center gap-3 text-[10px] text-white/30">
           <span class="h-px flex-1 bg-line"></span>OR<span class="h-px flex-1 bg-line"></span>
         </div>
-        <div ref="googleEl" class="flex justify-center"></div>
+        <button
+          class="flex w-full items-center justify-center gap-2.5 rounded-xl border border-line bg-white py-3 text-sm font-semibold text-black transition-transform active:scale-95"
+          @click="google"
+        >
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 8 3l5.7-5.7C34.3 6.1 29.4 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 8 3l5.7-5.7C34.3 6.1 29.4 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C36.9 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
+          Continue with Google
+        </button>
       </div>
     </div>
   </div>

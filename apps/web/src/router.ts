@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { savedToken } from "./stores/app";
+import { hasStoredSession } from "./lib/supabase";
 import { useRoomStore } from "./stores/room";
 
 export const router = createRouter({
@@ -21,8 +21,7 @@ export const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  if (to.path !== "/login" && !savedToken()) return "/login";
-  if (to.path === "/login" && savedToken()) return "/";
+  if (to.path !== "/login" && !hasStoredSession()) return "/login";
   // Product rule: voice/call features can't run while docked in a room.
   if (to.meta.callFeature) {
     const room = useRoomStore();
