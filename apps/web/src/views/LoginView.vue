@@ -10,14 +10,18 @@ const router = useRouter();
 const nickname = ref("");
 const avatar = ref(AVATARS[0]);
 const busy = ref(false);
+const error = ref("");
 
 async function enter() {
   const name = nickname.value.trim();
   if (!name || busy.value) return;
   busy.value = true;
+  error.value = "";
   try {
     await app.login(name, avatar.value);
     router.replace("/");
+  } catch {
+    error.value = "Can't reach the server. Please try again in a moment.";
   } finally {
     busy.value = false;
   }
@@ -70,6 +74,8 @@ async function enter() {
       >
         {{ busy ? "Entering…" : "Enter Sora" }}
       </button>
+
+      <p v-if="error" class="text-center text-xs text-red-300">{{ error }}</p>
     </div>
   </div>
 </template>

@@ -1,0 +1,14 @@
+# Render Blueprint — deploys the Socket.IO server.
+# render.com → New → Blueprint → pick this repo.
+# Free plan sleeps after ~15 min idle; first request wakes it (~30s).
+services:
+  - type: web
+    name: sora-server
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start --workspace apps/server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"

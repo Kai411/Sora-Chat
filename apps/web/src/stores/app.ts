@@ -33,17 +33,19 @@ export const useAppStore = defineStore("app", {
       socket.on("connect", () => {
         this.connected = true;
         // Re-identify after a reconnect.
-        if (this.user) this.hello(this.user.nickname, this.user.avatar);
+        if (this.user) this.hello(this.user.nickname, this.user.avatar).catch(() => {});
       });
       socket.on("disconnect", () => (this.connected = false));
     },
     async login(nickname: string, avatar: string) {
-      localStorage.setItem(PROFILE_KEY, JSON.stringify({ nickname, avatar }));
       if (!socket.connected) socket.connect();
       await this.hello(nickname, avatar);
+      // Persist only after the server accepted us, so a dead backend
+      // doesn't strand the router guard past the login screen.
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({ nickname, avatar }));
     },
     async hello(nickname: string, avatar: string) {
-      const res = await socket.emitWithAck("hello", { nickname, avatar });
+      const res = await socket.timeout(8000).emitWithAck("hello", { nickname, avatar });
       this.user = res.user;
       this.coins = res.coins;
       this.vip = res.vip;
