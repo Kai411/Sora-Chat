@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useRouter } from "vue-router";
 import { useAppStore } from "../stores/app";
 
 const app = useAppStore();
+const router = useRouter();
 
 const features = [
   { to: "/random-chat", icon: "💬", title: "Random Chat", desc: "Text a stranger", grad: "from-violet-500 to-fuchsia-500" },
@@ -30,8 +32,13 @@ const features = [
           </p>
         </div>
       </div>
-      <div class="flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold">
-        🪙 {{ app.coins.toLocaleString() }}
+      <div class="flex items-center gap-2">
+        <RouterLink to="/dms" class="grid size-9 place-items-center rounded-full bg-surface text-lg" title="Messages">
+          💌
+        </RouterLink>
+        <div class="flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold">
+          🪙 {{ app.coins.toLocaleString() }}
+        </div>
       </div>
     </header>
 
@@ -58,7 +65,13 @@ const features = [
         </span>
       </div>
       <div class="scrollbar-none -mx-5 mt-3 flex gap-4 overflow-x-auto px-5">
-        <div v-for="u in app.others" :key="u.nickname" class="flex w-14 shrink-0 flex-col items-center gap-1">
+        <button
+          v-for="u in app.others"
+          :key="u.id"
+          class="flex w-14 shrink-0 flex-col items-center gap-1"
+          :title="`Message ${u.nickname}`"
+          @click="router.push(`/dms/${u.id}`)"
+        >
           <div class="relative grid size-13 place-items-center rounded-full bg-surface-2 text-2xl">
             {{ u.avatar }}
             <span
@@ -66,9 +79,9 @@ const features = [
             ></span>
           </div>
           <p class="w-full truncate text-center text-[10px] text-white/50">{{ u.nickname }}</p>
-        </div>
+        </button>
         <p v-if="!app.others.length" class="py-3 text-xs text-white/30">
-          No one else is online yet — open a second tab to test!
+          No one else is online — tap an avatar here to DM them when they appear.
         </p>
       </div>
     </section>

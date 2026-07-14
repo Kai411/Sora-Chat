@@ -16,7 +16,7 @@ async function load() {
 
 function onNew({ post }: { post: Post }) {
   if (tab.value === "public" && !feed.value.some((p) => p.id === post.id)) {
-    feed.value.unshift({ ...post, mine: post.author === app.user?.nickname });
+    feed.value.unshift({ ...post, mine: post.userId === app.user?.id });
   }
 }
 
@@ -35,9 +35,9 @@ async function like(post: Post) {
 }
 
 async function follow(post: Post) {
-  const res = await socket.emitWithAck("user:follow", { nickname: post.author });
+  const res = await socket.emitWithAck("user:follow", { userId: post.userId });
   if (!res) return;
-  for (const p of feed.value) if (p.author === res.nickname) p.following = res.following;
+  for (const p of feed.value) if (p.userId === res.userId) p.following = res.following;
 }
 
 function ago(ts: number) {

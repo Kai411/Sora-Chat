@@ -92,7 +92,7 @@ onUnmounted(() => {
         <span class="grid size-20 place-items-center rounded-full bg-surface-2 text-4xl">💬</span>
       </div>
       <p class="text-sm text-white/50">Finding someone for you…</p>
-      <p class="text-xs text-white/25">(open a second browser tab to match with yourself)</p>
+      <p class="text-xs text-white/25">(to test solo: sign in with a second account in a private window)</p>
     </div>
 
     <template v-else>

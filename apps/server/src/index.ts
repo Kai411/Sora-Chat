@@ -1,141 +1,54 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { Server, type Socket } from "socket.io";
+import { db, getUserById, publicUser, type UserRow } from "./db";
+import { createSession, endSessionToken, loginEmail, loginGoogle, register, resumeSession } from "./auth";
 
 const PORT = Number(process.env.PORT) || 3001;
 
 // ---------------------------------------------------------------------------
-// In-memory state. Prototype only — swap for Postgres/Redis in phase 1.
+// Live (non-persisted) state: presence, rooms, matchmaking, call sessions.
 // ---------------------------------------------------------------------------
 
-type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic";
+const online = new Map<string, number>(); // socketId -> userId
 
-interface GachaItem {
+interface LiveRoom {
+  id: string;
   name: string;
   icon: string;
-  rarity: Rarity;
+  topic: string;
+  creator: ReturnType<typeof publicUser>;
 }
-
-interface Profile {
-  nickname: string;
-  avatar: string;
-  coins: number;
-  vip: boolean;
-  following: Set<string>;
-  inventory: GachaItem[];
-  lastDailyClaim: number;
-}
-
-const profiles = new Map<string, Profile>();
-const online = new Map<string, string>(); // socketId -> nickname
-
-function getProfile(nickname: string, avatar = "🙂"): Profile {
-  let p = profiles.get(nickname);
-  if (!p) {
-    p = {
-      nickname,
-      avatar,
-      coins: 1000,
-      vip: false,
-      following: new Set(),
-      inventory: [],
-      lastDailyClaim: 0,
-    };
-    profiles.set(nickname, p);
-  }
-  return p;
-}
-
-function publicUser(p: Profile) {
-  return { nickname: p.nickname, avatar: p.avatar, vip: p.vip };
-}
-
-// Seed bots so the app feels alive when testing alone.
-const BOTS = [
-  { nickname: "Luna", avatar: "🌙" },
-  { nickname: "Kite", avatar: "🪁" },
-  { nickname: "Mochi", avatar: "🍡" },
-  { nickname: "Nova", avatar: "🌟" },
-  { nickname: "Rin", avatar: "🎧" },
-];
-for (const b of BOTS) getProfile(b.nickname, b.avatar);
-
-// ---------------------------------------------------------------------------
-// Feed
-// ---------------------------------------------------------------------------
-
-interface Post {
-  id: number;
-  author: string;
-  avatar: string;
-  text: string;
-  ts: number;
-  likes: Set<string>;
-}
-
-let postSeq = 1;
-const posts: Post[] = [];
-
-function addPost(author: string, text: string): Post {
-  const p = getProfile(author);
-  const post: Post = { id: postSeq++, author, avatar: p.avatar, text, ts: Date.now(), likes: new Set() };
-  posts.push(post);
-  return post;
-}
-
-addPost("Luna", "First night on Sora ✨ anyone up for a random call?");
-addPost("Mochi", "Pulled a Legendary on my third gacha... I'm never this lucky 🐉");
-addPost("Kite", "The music room is playing city pop tonight, come through 🎵");
-addPost("Nova", "Reminder: be kind to strangers, you might make a friend 💜");
-addPost("Rin", "3am thoughts hit different in Midnight Confessions 🌙");
-
-function serializePost(post: Post, viewer: string | null) {
-  const v = viewer ? profiles.get(viewer) : undefined;
-  return {
-    id: post.id,
-    author: post.author,
-    avatar: post.avatar,
-    text: post.text,
-    ts: post.ts,
-    likes: post.likes.size,
-    liked: viewer ? post.likes.has(viewer) : false,
-    following: v ? v.following.has(post.author) : false,
-    mine: viewer === post.author,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Group rooms
-// ---------------------------------------------------------------------------
-
-const ROOMS = [
-  { id: "lounge", name: "Chill Lounge", icon: "🛋️", topic: "Late-night talks & good vibes" },
-  { id: "music", name: "Music Corner", icon: "🎵", topic: "Share what you're listening to" },
-  { id: "games", name: "Game Zone", icon: "🎮", topic: "Find a duo, talk games" },
-  { id: "confess", name: "Midnight Confessions", icon: "🌙", topic: "Say what you can't say elsewhere" },
-];
 
 interface RoomMsg {
   id: number;
+  userId: number;
   author: string;
   avatar: string;
   text: string;
   ts: number;
 }
 
+const rooms = new Map<string, LiveRoom>();
+const roomMessages = new Map<string, RoomMsg[]>();
 let roomMsgSeq = 1;
-const roomMessages = new Map<string, RoomMsg[]>(ROOMS.map((r) => [r.id, []]));
-
-// ---------------------------------------------------------------------------
-// Matchmaking (random chat / random call)
-// ---------------------------------------------------------------------------
 
 type Mode = "chat" | "call";
 const queues: Record<Mode, string[]> = { chat: [], call: [] };
-const sessions = new Map<string, { mode: Mode; peers: [string, string] }>();
+
+interface CallSession {
+  mode: Mode | "dm";
+  peers: string[]; // socket ids
+  inviterUserId?: number;
+  calleeUserId?: number;
+}
+const sessions = new Map<string, CallSession>();
 
 // ---------------------------------------------------------------------------
 // Gacha
 // ---------------------------------------------------------------------------
+
+type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic";
 
 const GACHA_POOL: Record<Rarity, { name: string; icon: string }[]> = {
   common: [
@@ -175,7 +88,7 @@ function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function rollOnce(minRarity?: Rarity): GachaItem {
+function rollOnce(minRarity?: Rarity) {
   const roll = Math.random();
   let acc = 0;
   let rarity: Rarity = "common";
@@ -191,6 +104,53 @@ function rollOnce(minRarity?: Rarity): GachaItem {
 }
 
 // ---------------------------------------------------------------------------
+// Prepared statements
+// ---------------------------------------------------------------------------
+
+const setCoins = db.prepare("UPDATE users SET coins = ? WHERE id = ?");
+const setVip = db.prepare("UPDATE users SET vip = 1 WHERE id = ?");
+const setDaily = db.prepare("UPDATE users SET last_daily = ?, coins = ? WHERE id = ?");
+const setAvatar = db.prepare("UPDATE users SET avatar = ? WHERE id = ?");
+const addInventory = db.prepare("INSERT INTO inventory (user_id, name, icon, rarity) VALUES (?, ?, ?, ?)");
+const listInventory = db.prepare("SELECT name, icon, rarity FROM inventory WHERE user_id = ?");
+
+const insertPost = db.prepare("INSERT INTO posts (user_id, text, ts) VALUES (?, ?, ?)");
+const likeStmt = db.prepare("INSERT OR IGNORE INTO likes (post_id, user_id) VALUES (?, ?)");
+const unlikeStmt = db.prepare("DELETE FROM likes WHERE post_id = ? AND user_id = ?");
+const hasLike = db.prepare("SELECT 1 FROM likes WHERE post_id = ? AND user_id = ?");
+const followStmt = db.prepare("INSERT OR IGNORE INTO follows (follower, followee) VALUES (?, ?)");
+const unfollowStmt = db.prepare("DELETE FROM follows WHERE follower = ? AND followee = ?");
+const hasFollow = db.prepare("SELECT 1 FROM follows WHERE follower = ? AND followee = ?");
+
+const FEED_SELECT = `
+  SELECT p.id, p.text, p.ts, p.user_id AS userId, u.nickname AS author, u.avatar,
+    (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS likes,
+    EXISTS(SELECT 1 FROM likes l WHERE l.post_id = p.id AND l.user_id = @viewer) AS liked,
+    EXISTS(SELECT 1 FROM follows f WHERE f.follower = @viewer AND f.followee = p.user_id) AS following
+  FROM posts p JOIN users u ON u.id = p.user_id`;
+const feedPublic = db.prepare(`${FEED_SELECT} ORDER BY p.ts DESC LIMIT 100`);
+const feedFollowing = db.prepare(
+  `${FEED_SELECT} WHERE EXISTS(SELECT 1 FROM follows f WHERE f.follower = @viewer AND f.followee = p.user_id)
+   ORDER BY p.ts DESC LIMIT 100`
+);
+const getPostRow = db.prepare(`${FEED_SELECT} WHERE p.id = @id`);
+
+const insertDm = db.prepare("INSERT INTO dms (sender, recipient, text, ts) VALUES (?, ?, ?, ?)");
+const dmHistory = db.prepare(
+  `SELECT id, sender, text, ts FROM dms
+   WHERE (sender = @a AND recipient = @b) OR (sender = @b AND recipient = @a)
+   ORDER BY ts DESC LIMIT 200`
+);
+const dmMarkRead = db.prepare("UPDATE dms SET read = 1 WHERE sender = ? AND recipient = ? AND read = 0");
+const dmRecent = db.prepare(
+  "SELECT id, sender, recipient, text, ts, read FROM dms WHERE sender = ? OR recipient = ? ORDER BY ts DESC LIMIT 1000"
+);
+
+function serializeFeedRow(row: any, viewerId: number) {
+  return { ...row, liked: !!row.liked, following: !!row.following, mine: row.userId === viewerId };
+}
+
+// ---------------------------------------------------------------------------
 // Server
 // ---------------------------------------------------------------------------
 
@@ -203,77 +163,133 @@ const httpServer = createServer((req, res) => {
   res.writeHead(404).end();
 });
 
-const io = new Server(httpServer, { cors: { origin: true } });
+const io = new Server(httpServer, { cors: { origin: true }, maxHttpBufferSize: 1e5 });
+
+function userSockets(userId: number): string[] {
+  return [...online.entries()].filter(([, uid]) => uid === userId).map(([sid]) => sid);
+}
 
 function broadcastPresence() {
-  const seen = new Set<string>();
+  const seen = new Set<number>();
   const users: any[] = [];
-  for (const nickname of online.values()) {
-    if (seen.has(nickname)) continue;
-    seen.add(nickname);
-    users.push({ ...publicUser(profiles.get(nickname)!), bot: false });
-  }
-  for (const b of BOTS) {
-    if (!seen.has(b.nickname)) users.push({ ...publicUser(profiles.get(b.nickname)!), bot: true });
+  for (const userId of online.values()) {
+    if (seen.has(userId)) continue;
+    seen.add(userId);
+    const u = getUserById.get(userId);
+    if (u) users.push(publicUser(u));
   }
   io.emit("presence", users);
 }
 
 function roomMembers(roomId: string) {
-  const ids = io.sockets.adapter.rooms.get(`room:${roomId}`) ?? new Set();
+  const ids = io.sockets.adapter.rooms.get(`room:${roomId}`) ?? new Set<string>();
+  const seen = new Set<number>();
   const members: any[] = [];
-  for (const id of ids) {
-    const nickname = online.get(id);
-    if (nickname) members.push(publicUser(profiles.get(nickname)!));
+  for (const sid of ids) {
+    const userId = online.get(sid);
+    if (userId === undefined || seen.has(userId)) continue;
+    seen.add(userId);
+    const u = getUserById.get(userId);
+    if (u) members.push(publicUser(u));
   }
   return members;
+}
+
+function closeRoomIfEmpty(roomId: string) {
+  const occupied = io.sockets.adapter.rooms.get(`room:${roomId}`)?.size ?? 0;
+  if (!occupied && rooms.has(roomId)) {
+    rooms.delete(roomId);
+    roomMessages.delete(roomId);
+  }
 }
 
 function endSession(sessionId: string, exceptSocketId?: string) {
   const session = sessions.get(sessionId);
   if (!session) return;
   sessions.delete(sessionId);
-  for (const id of session.peers) {
-    if (id !== exceptSocketId) io.to(id).emit("session:ended", { sessionId });
-    io.sockets.sockets.get(id)?.leave(sessionId);
+  // Pending DM invite: tell the callee's phones to stop ringing.
+  if (session.mode === "dm" && session.peers.length === 1 && session.calleeUserId !== undefined) {
+    for (const sid of userSockets(session.calleeUserId)) io.to(sid).emit("dm:call:cancelled", { sessionId });
+  }
+  for (const sid of session.peers) {
+    if (sid !== exceptSocketId) io.to(sid).emit("session:ended", { sessionId });
+    io.sockets.sockets.get(sid)?.leave(sessionId);
   }
 }
 
 io.on("connection", (socket: Socket) => {
-  let nick: string | null = null;
+  let user: UserRow | null = null;
 
-  const me = () => (nick ? profiles.get(nick) ?? null : null);
+  const refresh = () => {
+    if (user) user = getUserById.get(user.id) ?? null;
+    return user;
+  };
 
-  socket.on("hello", ({ nickname, avatar }, ack) => {
-    nick = String(nickname ?? "").trim().slice(0, 20) || "Guest";
-    const p = getProfile(nick, avatar);
-    if (typeof avatar === "string" && avatar) p.avatar = avatar;
-    online.set(socket.id, nick);
+  function authOk(u: UserRow, ack: any, token?: string) {
+    user = u;
+    online.set(socket.id, u.id);
     broadcastPresence();
-    ack?.({ user: publicUser(p), coins: p.coins, vip: p.vip, inventory: p.inventory });
+    ack?.({
+      token: token ?? null,
+      user: publicUser(u),
+      coins: u.coins,
+      vip: !!u.vip,
+      inventory: listInventory.all(u.id),
+    });
+  }
+
+  // --- auth ----------------------------------------------------------------
+
+  socket.on("auth:register", ({ email, password, nickname, avatar }, ack) => {
+    const res = register(String(email ?? ""), String(password ?? ""), String(nickname ?? ""), String(avatar ?? "🙂"));
+    if ("error" in res) return ack?.({ error: res.error });
+    if (avatar) setAvatar.run(String(avatar), res.user.id);
+    authOk(getUserById.get(res.user.id)!, ack, createSession(res.user.id));
   });
 
-  // --- matchmaking ---------------------------------------------------------
+  socket.on("auth:login", ({ email, password }, ack) => {
+    const res = loginEmail(String(email ?? ""), String(password ?? ""));
+    if ("error" in res) return ack?.({ error: res.error });
+    authOk(res.user, ack, createSession(res.user.id));
+  });
+
+  socket.on("auth:google", async ({ idToken }, ack) => {
+    const res = await loginGoogle(String(idToken ?? ""));
+    if ("error" in res) return ack?.({ error: res.error });
+    authOk(res.user, ack, createSession(res.user.id));
+  });
+
+  socket.on("auth:resume", ({ token }, ack) => {
+    const u = resumeSession(String(token ?? ""));
+    if (!u) return ack?.({ error: "Session expired — please sign in again" });
+    authOk(u, ack);
+  });
+
+  socket.on("auth:logout", ({ token }) => {
+    if (token) endSessionToken(String(token));
+  });
+
+  // --- matchmaking (random chat / random call) -------------------------------
 
   socket.on("queue:join", ({ mode }: { mode: Mode }) => {
-    if (mode !== "chat" && mode !== "call") return;
+    if (!user || (mode !== "chat" && mode !== "call")) return;
     const q = queues[mode];
     if (q.includes(socket.id)) return;
-    const otherId = q.find((id) => id !== socket.id && online.has(id));
+    // Never match a user with their own second tab.
+    const otherId = q.find((sid) => online.has(sid) && online.get(sid) !== user!.id);
     if (!otherId) {
       q.push(socket.id);
       return;
     }
     q.splice(q.indexOf(otherId), 1);
-    const sessionId = `s_${Math.random().toString(36).slice(2, 10)}`;
+    const sessionId = `s_${randomUUID().slice(0, 8)}`;
     sessions.set(sessionId, { mode, peers: [socket.id, otherId] });
     const other = io.sockets.sockets.get(otherId);
     socket.join(sessionId);
     other?.join(sessionId);
-    const myProfile = me()!;
-    const otherProfile = profiles.get(online.get(otherId)!)!;
-    socket.emit("match:found", { sessionId, mode, role: "caller", peer: publicUser(otherProfile) });
-    io.to(otherId).emit("match:found", { sessionId, mode, role: "callee", peer: publicUser(myProfile) });
+    const otherUser = getUserById.get(online.get(otherId)!)!;
+    socket.emit("match:found", { sessionId, mode, role: "caller", peer: publicUser(otherUser) });
+    io.to(otherId).emit("match:found", { sessionId, mode, role: "callee", peer: publicUser(user) });
   });
 
   socket.on("queue:leave", () => {
@@ -285,9 +301,8 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("session:message", ({ sessionId, text }) => {
     const session = sessions.get(sessionId);
-    if (!session || !session.peers.includes(socket.id)) return;
     const t = String(text ?? "").slice(0, 500);
-    if (!t) return;
+    if (!session || !session.peers.includes(socket.id) || !t) return;
     socket.to(sessionId).emit("session:message", { sessionId, text: t, ts: Date.now() });
   });
 
@@ -299,15 +314,31 @@ io.on("connection", (socket: Socket) => {
     socket.to(sessionId).emit("rtc:signal", { sessionId, data });
   });
 
-  // --- group rooms ---------------------------------------------------------
+  // --- user-created rooms ----------------------------------------------------
+
+  socket.on("rooms:create", ({ name, icon, topic }, ack) => {
+    if (!user) return;
+    const n = String(name ?? "").trim().slice(0, 30);
+    if (!n) return ack?.({ error: "Give your room a name" });
+    const room: LiveRoom = {
+      id: `r_${randomUUID().slice(0, 8)}`,
+      name: n,
+      icon: String(icon ?? "🎪").slice(0, 4),
+      topic: String(topic ?? "").trim().slice(0, 60),
+      creator: publicUser(user),
+    };
+    rooms.set(room.id, room);
+    roomMessages.set(room.id, []);
+    ack?.({ room });
+  });
 
   socket.on("rooms:list", (ack) => {
-    ack?.(ROOMS.map((r) => ({ ...r, members: roomMembers(r.id).length })));
+    ack?.([...rooms.values()].map((r) => ({ ...r, members: roomMembers(r.id).length })));
   });
 
   socket.on("room:join", ({ roomId }, ack) => {
-    const room = ROOMS.find((r) => r.id === roomId);
-    if (!room) return ack?.(null);
+    const room = rooms.get(roomId);
+    if (!user || !room) return ack?.(null);
     socket.join(`room:${roomId}`);
     ack?.({ room, messages: roomMessages.get(roomId), members: roomMembers(roomId) });
     io.to(`room:${roomId}`).emit("room:members", { roomId, members: roomMembers(roomId) });
@@ -316,93 +347,202 @@ io.on("connection", (socket: Socket) => {
   socket.on("room:leave", ({ roomId }) => {
     socket.leave(`room:${roomId}`);
     io.to(`room:${roomId}`).emit("room:members", { roomId, members: roomMembers(roomId) });
+    closeRoomIfEmpty(roomId);
   });
 
   socket.on("room:message", ({ roomId, text }) => {
-    const p = me();
     const t = String(text ?? "").slice(0, 500);
-    if (!p || !t || !roomMessages.has(roomId)) return;
-    const msg: RoomMsg = { id: roomMsgSeq++, author: p.nickname, avatar: p.avatar, text: t, ts: Date.now() };
+    if (!user || !t || !roomMessages.has(roomId)) return;
+    const msg: RoomMsg = {
+      id: roomMsgSeq++,
+      userId: user.id,
+      author: user.nickname,
+      avatar: user.avatar,
+      text: t,
+      ts: Date.now(),
+    };
     const list = roomMessages.get(roomId)!;
     list.push(msg);
     if (list.length > 200) list.shift();
     io.to(`room:${roomId}`).emit("room:message", { roomId, message: msg });
   });
 
-  // --- feed ----------------------------------------------------------------
+  // --- direct messages -------------------------------------------------------
+
+  socket.on("dm:conversations", (ack) => {
+    if (!user) return ack?.([]);
+    const mine = user.id;
+    const rowsDb = dmRecent.all(mine, mine) as any[];
+    const byPartner = new Map<number, { last: any; unread: number }>();
+    for (const m of rowsDb) {
+      const partner = m.sender === mine ? m.recipient : m.sender;
+      let entry = byPartner.get(partner);
+      if (!entry) {
+        entry = { last: m, unread: 0 };
+        byPartner.set(partner, entry);
+      }
+      if (m.recipient === mine && !m.read) entry.unread++;
+    }
+    const list = [...byPartner.entries()]
+      .map(([partnerId, { last, unread }]) => {
+        const partner = getUserById.get(partnerId);
+        return partner
+          ? { user: publicUser(partner), last: { text: last.text, ts: last.ts, mine: last.sender === mine }, unread }
+          : null;
+      })
+      .filter(Boolean);
+    ack?.(list);
+  });
+
+  socket.on("dm:history", ({ userId }, ack) => {
+    const partner = getUserById.get(Number(userId));
+    if (!user || !partner) return ack?.(null);
+    dmMarkRead.run(partner.id, user.id);
+    const messages = (dmHistory.all({ a: user.id, b: partner.id }) as any[])
+      .reverse()
+      .map((m) => ({ id: m.id, text: m.text, ts: m.ts, mine: m.sender === user!.id }));
+    ack?.({ peer: publicUser(partner), messages });
+  });
+
+  socket.on("dm:send", ({ userId, text }, ack) => {
+    const partner = getUserById.get(Number(userId));
+    const t = String(text ?? "").trim().slice(0, 500);
+    if (!user || !partner || !t || partner.id === user.id) return ack?.(null);
+    const ts = Date.now();
+    const info = insertDm.run(user.id, partner.id, t, ts);
+    const message = { id: Number(info.lastInsertRowid), text: t, ts };
+    for (const sid of userSockets(partner.id)) {
+      io.to(sid).emit("dm:new", { from: publicUser(user), message });
+    }
+    ack?.({ ...message, mine: true });
+  });
+
+  socket.on("dm:read", ({ userId }) => {
+    if (user) dmMarkRead.run(Number(userId), user.id);
+  });
+
+  // --- DM calls ---------------------------------------------------------------
+
+  socket.on("dm:call:invite", ({ userId }, ack) => {
+    const callee = getUserById.get(Number(userId));
+    if (!user || !callee || callee.id === user.id) return ack?.({ error: "Can't call that user" });
+    const calleeSockets = userSockets(callee.id);
+    if (!calleeSockets.length) return ack?.({ error: `${callee.nickname} is offline` });
+    const sessionId = `s_${randomUUID().slice(0, 8)}`;
+    sessions.set(sessionId, { mode: "dm", peers: [socket.id], inviterUserId: user.id, calleeUserId: callee.id });
+    socket.join(sessionId);
+    for (const sid of calleeSockets) io.to(sid).emit("dm:call:incoming", { sessionId, from: publicUser(user) });
+    ack?.({ sessionId, peer: publicUser(callee) });
+  });
+
+  socket.on("dm:call:accept", ({ sessionId }, ack) => {
+    const session = sessions.get(sessionId);
+    if (!user || !session || session.mode !== "dm" || session.calleeUserId !== user.id || session.peers.length !== 1) {
+      return ack?.({ error: "That call is no longer available" });
+    }
+    const inviterSocket = session.peers[0];
+    const inviter = getUserById.get(session.inviterUserId!);
+    if (!online.has(inviterSocket) || !inviter) {
+      sessions.delete(sessionId);
+      return ack?.({ error: "The caller hung up" });
+    }
+    session.peers.push(socket.id);
+    socket.join(sessionId);
+    // Stop ringing on the callee's other tabs/devices.
+    for (const sid of userSockets(user.id)) {
+      if (sid !== socket.id) io.to(sid).emit("dm:call:cancelled", { sessionId });
+    }
+    io.to(inviterSocket).emit("dm:call:start", { sessionId, role: "caller", peer: publicUser(user) });
+    ack?.({ sessionId, role: "callee", peer: publicUser(inviter) });
+  });
+
+  socket.on("dm:call:decline", ({ sessionId }) => {
+    const session = sessions.get(sessionId);
+    if (!user || !session || session.mode !== "dm" || session.calleeUserId !== user.id) return;
+    sessions.delete(sessionId);
+    for (const sid of userSockets(user.id)) io.to(sid).emit("dm:call:cancelled", { sessionId });
+    io.to(session.peers[0]).emit("dm:call:declined", { sessionId });
+  });
+
+  // --- feed --------------------------------------------------------------------
 
   socket.on("feed:list", ({ tab }, ack) => {
-    const p = me();
-    let list = [...posts].sort((a, b) => b.ts - a.ts);
-    if (tab === "following" && p) list = list.filter((x) => p.following.has(x.author));
-    ack?.(list.map((x) => serializePost(x, nick)));
+    if (!user) return ack?.([]);
+    const stmt = tab === "following" ? feedFollowing : feedPublic;
+    ack?.(stmt.all({ viewer: user.id }).map((r) => serializeFeedRow(r, user!.id)));
   });
 
   socket.on("feed:post", ({ text }, ack) => {
-    const p = me();
     const t = String(text ?? "").trim().slice(0, 500);
-    if (!p || !t) return ack?.(null);
-    const post = addPost(p.nickname, t);
-    io.emit("feed:new", { post: serializePost(post, null) });
-    ack?.(serializePost(post, nick));
+    if (!user || !t) return ack?.(null);
+    const info = insertPost.run(user.id, t, Date.now());
+    const row = getPostRow.get({ viewer: user.id, id: Number(info.lastInsertRowid) });
+    io.emit("feed:new", { post: serializeFeedRow(row, -1) });
+    ack?.(serializeFeedRow(row, user.id));
   });
 
   socket.on("feed:like", ({ id }, ack) => {
-    const post = posts.find((x) => x.id === id);
-    if (!post || !nick) return;
-    post.likes.has(nick) ? post.likes.delete(nick) : post.likes.add(nick);
-    ack?.({ id, likes: post.likes.size, liked: post.likes.has(nick) });
+    if (!user) return;
+    const postId = Number(id);
+    if (hasLike.get(postId, user.id)) unlikeStmt.run(postId, user.id);
+    else likeStmt.run(postId, user.id);
+    const row: any = getPostRow.get({ viewer: user.id, id: postId });
+    if (row) ack?.({ id: postId, likes: row.likes, liked: !!row.liked });
   });
 
-  socket.on("user:follow", ({ nickname }, ack) => {
-    const p = me();
-    if (!p || !profiles.has(nickname) || nickname === nick) return;
-    p.following.has(nickname) ? p.following.delete(nickname) : p.following.add(nickname);
-    ack?.({ nickname, following: p.following.has(nickname) });
+  socket.on("user:follow", ({ userId }, ack) => {
+    const target = getUserById.get(Number(userId));
+    if (!user || !target || target.id === user.id) return;
+    if (hasFollow.get(user.id, target.id)) unfollowStmt.run(user.id, target.id);
+    else followStmt.run(user.id, target.id);
+    ack?.({ userId: target.id, following: !!hasFollow.get(user.id, target.id) });
   });
 
-  // --- gacha / economy -----------------------------------------------------
+  // --- gacha / economy -----------------------------------------------------------
 
   socket.on("gacha:rates", (ack) => {
     ack?.(GACHA_RATES.map(([rarity, rate]) => ({ rarity, rate })));
   });
 
   socket.on("gacha:pull", ({ count }, ack) => {
-    const p = me();
-    if (!p) return;
+    const u = refresh();
+    if (!u) return;
     const n = count === 10 ? 10 : 1;
     const cost = n === 10 ? 900 : 100;
-    if (p.coins < cost) return ack?.({ error: "Not enough coins" });
-    p.coins -= cost;
+    if (u.coins < cost) return ack?.({ error: "Not enough coins" });
     const results = Array.from({ length: n }, () => rollOnce());
     // 10-pull pity: guarantee at least one rare or better.
     if (n === 10 && results.every((r) => r.rarity === "common")) results[n - 1] = rollOnce("rare");
-    p.inventory.push(...results);
-    ack?.({ results, coins: p.coins, inventory: p.inventory });
+    const applyPull = db.transaction(() => {
+      setCoins.run(u.coins - cost, u.id);
+      for (const r of results) addInventory.run(u.id, r.name, r.icon, r.rarity);
+    });
+    applyPull();
+    ack?.({ results, coins: u.coins - cost, inventory: listInventory.all(u.id) });
   });
 
   socket.on("daily:claim", (ack) => {
-    const p = me();
-    if (!p) return;
+    const u = refresh();
+    if (!u) return;
     const DAY = 24 * 60 * 60 * 1000;
-    if (Date.now() - p.lastDailyClaim < DAY) return ack?.({ error: "Already claimed today", coins: p.coins });
-    p.lastDailyClaim = Date.now();
-    p.coins += p.vip ? 600 : 300;
-    ack?.({ coins: p.coins });
+    if (Date.now() - u.last_daily < DAY) return ack?.({ error: "Already claimed today", coins: u.coins });
+    const coins = u.coins + (u.vip ? 600 : 300);
+    setDaily.run(Date.now(), coins, u.id);
+    ack?.({ coins });
   });
 
   socket.on("vip:activate", (ack) => {
-    const p = me();
-    if (!p) return;
-    if (p.vip) return ack?.({ vip: true, coins: p.coins });
-    if (p.coins < 800) return ack?.({ error: "Not enough coins (VIP costs 800)" });
-    p.coins -= 800;
-    p.vip = true;
+    const u = refresh();
+    if (!u) return;
+    if (u.vip) return ack?.({ vip: true, coins: u.coins });
+    if (u.coins < 800) return ack?.({ error: "Not enough coins (VIP costs 800)" });
+    setCoins.run(u.coins - 800, u.id);
+    setVip.run(u.id);
     broadcastPresence();
-    ack?.({ vip: true, coins: p.coins });
+    ack?.({ vip: true, coins: u.coins - 800 });
   });
 
-  // --- disconnect ----------------------------------------------------------
+  // --- disconnect ------------------------------------------------------------------
 
   socket.on("disconnecting", () => {
     for (const q of Object.values(queues)) {
@@ -412,11 +552,14 @@ io.on("connection", (socket: Socket) => {
     for (const [sessionId, session] of sessions) {
       if (session.peers.includes(socket.id)) endSession(sessionId, socket.id);
     }
-    const joinedRooms = [...socket.rooms].filter((r) => r.startsWith("room:"));
+    const joinedRooms = [...socket.rooms].filter((r) => r.startsWith("room:")).map((r) => r.slice(5));
     online.delete(socket.id);
     // Membership updates fire after the socket actually leaves.
     setImmediate(() => {
-      for (const r of joinedRooms) io.to(r).emit("room:members", { roomId: r.slice(5), members: roomMembers(r.slice(5)) });
+      for (const roomId of joinedRooms) {
+        io.to(`room:${roomId}`).emit("room:members", { roomId, members: roomMembers(roomId) });
+        closeRoomIfEmpty(roomId);
+      }
       broadcastPresence();
     });
   });
