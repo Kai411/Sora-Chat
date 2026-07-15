@@ -65,6 +65,8 @@ All traffic uses Socket.IO (acks as RPC). Deploys: web on Netlify (`netlify.toml
 
 ## Roadmap
 
+**Next feature iteration** (spec, not yet built): party rooms with audio seats, nav rework (Chat tab replaces Gacha), multi-banner gacha, photo posts + comments. See [PLANNING.md](PLANNING.md).
+
 - **Phase 1 — production backend:** move app data from SQLite to Supabase Postgres (auth is already Supabase), rate limiting, moderation basics (block/report — required by app stores for UGC apps).
 - **Phase 2 — group audio:** LiveKit SFU for voice rooms; TURN server for NAT-blocked P2P calls.
 - **Phase 3 — Capacitor wrap:** iOS/Android shells, push notifications (FCM/APNs), RevenueCat for gacha/VIP IAP (StoreKit/Play Billing; Stripe stays on web).
