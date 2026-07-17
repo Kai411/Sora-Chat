@@ -30,8 +30,6 @@ const memberMenu = ref<PublicUser | null>(null);
 const pickingSeatFor = ref<number | null>(null); // staff picking a seat to invite this userId to
 const toast = ref("");
 
-const CATEGORY_LABEL: Record<string, string> = { music: "Music Room", private: "Private Room", chat: "Chat Room" };
-
 const mySeat = computed(() => (room.mySeatIndex >= 0 ? room.seats[room.mySeatIndex] : null));
 
 function flash(msg: string) {
@@ -175,14 +173,12 @@ onUnmounted(() => {
 
     <template v-else>
       <header class="flex items-center gap-2.5 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <button class="text-white/50" title="Minimize — you stay in the room" @click="minimize">⌄</button>
         <span class="text-xl">{{ room.room?.icon }}</span>
         <div class="min-w-0 flex-1">
           <p class="flex items-center gap-1 truncate text-sm font-semibold">
             <Icon v-if="room.room?.locked" name="lock" cls="size-3 shrink-0 text-white/50" />
             {{ room.room?.name ?? "…" }}
           </p>
-          <p class="text-[10px] text-white/40">{{ CATEGORY_LABEL[room.room?.category ?? "chat"] }}</p>
         </div>
         <button
           class="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-semibold"
@@ -191,6 +187,13 @@ onUnmounted(() => {
         >
           <Icon name="users" cls="size-3.5 text-white/60" />
           {{ room.members.length }}/{{ ROOM_CAPACITY }}
+        </button>
+        <button
+          class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
+          title="Minimize — you stay in the room"
+          @click="minimize"
+        >
+          <Icon name="minimize" cls="size-4" />
         </button>
         <button
           class="grid size-8 place-items-center rounded-full bg-surface-2 text-red-300"

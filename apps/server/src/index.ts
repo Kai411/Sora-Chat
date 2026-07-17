@@ -21,6 +21,7 @@ const ROOM_CATEGORIES = ["music", "private", "chat"] as const;
 type RoomCategory = (typeof ROOM_CATEGORIES)[number];
 
 const SEAT_COUNT = 10; // rendered as 2 rows × 5 columns
+const CATEGORY_ICONS: Record<RoomCategory, string> = { music: "🎵", private: "🥂", chat: "💬" };
 
 interface SeatState {
   userId: number;
@@ -465,7 +466,7 @@ io.on("connection", (socket: Socket) => {
 
   // --- party rooms -------------------------------------------------------------
 
-  socket.on("rooms:create", ({ category, name, icon, topic, pin }, ack) => {
+  socket.on("rooms:create", ({ category, name, topic, pin }, ack) => {
     if (!user) return;
     const n = String(name ?? "").trim().slice(0, 30);
     if (!ROOM_CATEGORIES.includes(category)) return ack?.({ error: "Pick a room category" });
@@ -478,7 +479,7 @@ io.on("connection", (socket: Socket) => {
     const room: LiveRoom = {
       id: `r_${randomUUID().slice(0, 8)}`,
       name: n,
-      icon: String(icon ?? "🎪").slice(0, 4),
+      icon: CATEGORY_ICONS[category as RoomCategory],
       topic: String(topic ?? "").trim().slice(0, 60),
       category,
       pin: pinValue,

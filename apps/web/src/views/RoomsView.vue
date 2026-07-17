@@ -5,7 +5,6 @@ import { socket } from "../lib/socket";
 import Icon from "../components/Icon.vue";
 import type { RoomCategory, RoomInfo } from "../types";
 
-const ICONS = ["🎪", "🛋️", "🎵", "🎮", "🌙", "☕", "📚", "🌈"];
 const CATEGORIES: { id: RoomCategory; label: string; icon: string }[] = [
   { id: "music", label: "Music Room", icon: "🎵" },
   { id: "private", label: "Private Room", icon: "🔒" },
@@ -18,7 +17,6 @@ const creating = ref(false);
 const category = ref<RoomCategory>("chat");
 const name = ref("");
 const topic = ref("");
-const icon = ref(ICONS[0]);
 const locked = ref(false);
 const pin = ref("");
 const error = ref("");
@@ -35,7 +33,6 @@ async function create() {
   const res = await socket.emitWithAck("rooms:create", {
     category: category.value,
     name: name.value,
-    icon: icon.value,
     topic: topic.value,
     pin: locked.value ? pin.value : null,
   });
@@ -113,17 +110,6 @@ onMounted(load);
               <span class="block text-lg">{{ c.icon }}</span>{{ c.label }}
             </button>
           </div>
-        </div>
-        <div class="grid grid-cols-8 gap-1.5">
-          <button
-            v-for="i in ICONS"
-            :key="i"
-            class="rounded-lg bg-surface py-1.5 text-xl transition-transform active:scale-90"
-            :class="icon === i && 'ring-2 ring-emerald-400 bg-surface-2'"
-            @click="icon = i"
-          >
-            {{ i }}
-          </button>
         </div>
         <div class="flex items-center gap-2 rounded-xl border border-line bg-surface px-3">
           <span class="shrink-0 text-xs text-white/40">{{ categoryLabel(category) }} ·</span>

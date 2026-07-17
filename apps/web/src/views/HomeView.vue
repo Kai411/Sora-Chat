@@ -6,18 +6,46 @@ const app = useAppStore();
 const router = useRouter();
 
 const features = [
-  { to: "/random-chat", icon: "💬", title: "Random Chat", desc: "Text a stranger", grad: "from-violet-500 to-fuchsia-500" },
-  { to: "/random-call", icon: "📞", title: "Random Call", desc: "Voice roulette", grad: "from-sky-500 to-cyan-400" },
-  { to: "/rooms", icon: "🎪", title: "Chat Rooms", desc: "Join the crowd", grad: "from-emerald-500 to-lime-400" },
-  { to: "/gacha", icon: "🎁", title: "Gacha", desc: "Try your luck", grad: "from-amber-500 to-orange-500" },
+  {
+    to: "/random-chat",
+    icon: "💬",
+    title: "Random Chat",
+    desc: "Text a stranger",
+    grad: "from-violet-500 to-fuchsia-500",
+  },
+  {
+    to: "/random-call",
+    icon: "📞",
+    title: "Random Call",
+    desc: "Voice roulette",
+    grad: "from-sky-500 to-cyan-400",
+  },
+  {
+    to: "/rooms",
+    icon: "🎪",
+    title: "Party Rooms",
+    desc: "Join the crowd",
+    grad: "from-emerald-500 to-lime-400",
+  },
+  {
+    to: "/gacha",
+    icon: "🎁",
+    title: "Gacha",
+    desc: "Try your luck",
+    grad: "from-amber-500 to-orange-500",
+  },
 ];
 </script>
 
 <template>
-  <div class="overflow-y-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-6">
+  <div
+    class="overflow-y-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-6"
+  >
     <header class="flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="grid size-11 place-items-center rounded-full bg-surface-2 text-2xl">
+        <div
+          class="grid size-11 place-items-center rounded-full bg-surface-2 text-2xl"
+        >
           {{ app.user?.avatar ?? "🙂" }}
         </div>
         <div>
@@ -32,7 +60,9 @@ const features = [
           </p>
         </div>
       </div>
-      <div class="flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold">
+      <div
+        class="flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold"
+      >
         🪙 {{ app.coins.toLocaleString() }}
       </div>
     </header>
@@ -67,16 +97,21 @@ const features = [
           :title="`Message ${u.nickname}`"
           @click="router.push(`/dms/${u.id}`)"
         >
-          <div class="relative grid size-13 place-items-center rounded-full bg-surface-2 text-2xl">
+          <div
+            class="relative grid size-13 place-items-center rounded-full bg-surface-2 text-2xl"
+          >
             {{ u.avatar }}
             <span
               class="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-bg bg-emerald-400"
             ></span>
           </div>
-          <p class="w-full truncate text-center text-[10px] text-white/50">{{ u.nickname }}</p>
+          <p class="w-full truncate text-center text-[10px] text-white/50">
+            {{ u.nickname }}
+          </p>
         </button>
         <p v-if="!app.others.length" class="py-3 text-xs text-white/30">
-          No one else is online — tap an avatar here to DM them when they appear.
+          No one else is online — tap an avatar here to DM them when they
+          appear.
         </p>
       </div>
     </section>
