@@ -26,7 +26,8 @@ Open http://localhost:5173. To test social features solo, create a **second acco
 | Direct messages | ✅ IG-style: conversation list, unread counts, live delivery, persisted |
 | DM voice calls | ✅ ring / accept / decline flow, WebRTC P2P audio |
 | Random chat / random call | ✅ matchmaking queue, skip/next, WebRTC audio |
-| Party rooms | ✅ user-created with categories (Music/Private/Chat), optional 4-digit PIN lock, 10-seat stage (2×5): request→host approves, host invites to seats, mute states, max-2 admins, host transfer. Voice streams land with LiveKit (phase 2) |
+| Party rooms | ✅ user-created with categories (Music/Private/Chat), optional 4-digit PIN lock, 10-seat stage (2×5): request→host approves, host invites to seats, mute states, max-2 admins, host transfer |
+| Party-room live audio | ✅ via LiveKit — seated users speak, everyone listens; needs `LIVEKIT_*` env (free tier at cloud.livekit.io), shows "not configured" otherwise |
 | Minimized rooms | ✅ leave the page, stay in the room — dock pill with unread badge; call features force-leave |
 | Feed | ✅ public/following tabs, photo posts, comments, likes, follow, own posts on profile — persisted |
 | Gacha / economy | ✅ multiple banners with per-banner pools/pages, disclosed rates, 10-pull pity, persisted inventory/coins |
@@ -42,6 +43,7 @@ Persistence is **SQLite** (`apps/server/sora.db`, auto-created). Zero installs l
 | `VITE_SERVER_URL` | web build (Netlify) | Socket.IO server origin; defaults to same-origin |
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | web build | Supabase project URL + anon key (Settings → API) |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | server | same project; used to verify user access tokens |
+| `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | server | party-room audio — LiveKit Cloud free tier, or self-host via [infra/livekit/](infra/livekit/README.md) |
 | `DB_PATH` | server | SQLite file location (default `sora.db`) |
 | `PORT` | server | default 3001 |
 
@@ -69,7 +71,7 @@ All traffic uses Socket.IO (acks as RPC). Deploys: web on Netlify (`netlify.toml
 **Next feature iteration** (spec, not yet built): party rooms with audio seats, nav rework (Chat tab replaces Gacha), multi-banner gacha, photo posts + comments. See [PLANNING.md](PLANNING.md).
 
 - **Phase 1 — production backend:** move app data from SQLite to Supabase Postgres (auth is already Supabase), rate limiting, moderation basics (block/report — required by app stores for UGC apps).
-- **Phase 2 — group audio:** LiveKit SFU for voice rooms; TURN server for NAT-blocked P2P calls.
+- **Phase 2 — call hardening:** TURN server for NAT-blocked P2P calls (room audio ships via LiveKit already).
 - **Phase 3 — Capacitor wrap:** iOS/Android shells, push notifications (FCM/APNs), RevenueCat for gacha/VIP IAP (StoreKit/Play Billing; Stripe stays on web).
 - **Phase 4 — native call polish:** background audio, CallKit/ConnectionService, audio routing.
 - **Phase 5 — desktop (optional):** Electron or Tauri wrap of the same build.

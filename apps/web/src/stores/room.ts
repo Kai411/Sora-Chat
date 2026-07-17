@@ -1,7 +1,15 @@
 import { defineStore } from "pinia";
+import type { Room as LiveKitRoom } from "livekit-client";
 import { socket } from "../lib/socket";
 import { useAppStore } from "./app";
 import type { PublicUser, RoomInfo, RoomMsg, RoomState, Seat } from "../types";
+
+// LiveKit connection lives at module scope (non-reactive) so audio survives
+// minimizing the room; only the status string is reactive state.
+let lkRoom: LiveKitRoom | null = null;
+let lkAudioEls: HTMLMediaElement[] = [];
+
+export type RoomAudioStatus = "off" | "connecting" | "on" | "unavailable";
 
 /**
  * The active room lives in a global store so leaving the room *page* doesn't
@@ -20,6 +28,7 @@ export const useRoomStore = defineStore("room", {
     inviteSeat: null as number | null, // pending seat invite for me
     unread: 0,
     viewing: false, // true while RoomView is on screen
+    audio: "off" as RoomAudioStatus,
   }),
   getters: {
     myUserId(): number {
@@ -51,10 +60,8 @@ export const useRoomStore = defineStore("room", {
       });
       socket.on("room:state", (state: RoomState) => {
         if (state.roomId !== this.room?.id) return;
-        this.seats = state.seats;
-        this.hostId = state.hostId;
-        this.admins = state.admins;
-        this.requests = state.requests;
+        this.applyState(state);
+        this.syncMic();
       });
       socket.on("room:seatInvite", ({ roomId, seat }: { roomId: string; seat: number }) => {
         if (roomId === this.room?.id) this.inviteSeat = seat;
@@ -73,6 +80,7 @@ export const useRoomStore = defineStore("room", {
       this.applyState(res.state);
       this.inviteSeat = res.myInviteSeat;
       this.unread = 0;
+      this.connectAudio();
       return true;
     },
     applyState(state: RoomState) {
@@ -83,7 +91,72 @@ export const useRoomStore = defineStore("room", {
     },
     leave() {
       if (this.room) socket.emit("room:leave", { roomId: this.room.id });
+      this.disconnectAudio();
       this.$reset();
+    },
+    /** Connect to the room's LiveKit session; remote audio plays via hidden elements. */
+    async connectAudio() {
+      if (!this.room || lkRoom) return;
+      const roomId = this.room.id;
+      const res = await socket.emitWithAck("livekit:token", { roomId });
+      if (res?.error || !res?.token) {
+        this.audio = "unavailable";
+        return;
+      }
+      this.audio = "connecting";
+      try {
+        const { Room, RoomEvent } = await import("livekit-client");
+        const lk = new Room();
+        lkRoom = lk;
+        lk.on(RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind !== "audio") return;
+          const el = track.attach();
+          el.style.display = "none";
+          document.body.appendChild(el);
+          lkAudioEls.push(el);
+        });
+        lk.on(RoomEvent.TrackUnsubscribed, (track) => {
+          for (const el of track.detach()) {
+            el.remove();
+            lkAudioEls = lkAudioEls.filter((x) => x !== el);
+          }
+        });
+        lk.on(RoomEvent.Disconnected, () => {
+          if (lkRoom === lk) this.disconnectAudio();
+        });
+        await lk.connect(res.url, res.token);
+        // Room may have been left while we were connecting.
+        if (this.room?.id !== roomId) {
+          lk.disconnect();
+          return;
+        }
+        this.audio = "on";
+        this.syncMic();
+      } catch {
+        this.audio = "unavailable";
+        lkRoom?.disconnect();
+        lkRoom = null;
+      }
+    },
+    /** Publish the mic only while seated & unmuted; otherwise stay listen-only. */
+    async syncMic() {
+      if (!lkRoom || this.audio !== "on") return;
+      const seat = this.seats.find((s) => s?.id === this.myUserId);
+      const enable = !!seat && !seat.muted;
+      try {
+        await lkRoom.localParticipant.setMicrophoneEnabled(enable);
+      } catch {
+        // Mic permission denied — reflect reality on the seat state.
+        if (enable) this.setMuted(true);
+      }
+    },
+    disconnectAudio() {
+      const lk = lkRoom;
+      lkRoom = null;
+      lk?.disconnect();
+      for (const el of lkAudioEls) el.remove();
+      lkAudioEls = [];
+      this.audio = "off";
     },
     send(text: string) {
       if (this.room) socket.emit("room:message", { roomId: this.room.id, text });

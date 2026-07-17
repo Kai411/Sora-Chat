@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync, createReadStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { Server, type Socket } from "socket.io";
+import { AccessToken } from "livekit-server-sdk";
 import { db, getUserById, publicUser, type UserRow } from "./db";
 import { verifySupabaseToken } from "./auth";
 
@@ -623,6 +624,24 @@ io.on("connection", (socket: Socket) => {
     if (!seat) return;
     seat.muted = !!muted;
     broadcastRoom(r);
+  });
+
+  // LiveKit access for room audio: any member may subscribe/publish; the
+  // client only actually publishes while seated & unmuted. Env-gated —
+  // without LIVEKIT_* vars the room UI shows "audio not configured".
+  socket.on("livekit:token", async ({ roomId }, ack) => {
+    const { LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET } = process.env;
+    if (!LIVEKIT_URL || !LIVEKIT_API_KEY || !LIVEKIT_API_SECRET) return ack?.({ error: "not_configured" });
+    const r = rooms.get(roomId);
+    if (!user || !r) return ack?.({ error: "no_room" });
+    if (!roomMembers(roomId).some((m: any) => m.id === user!.id)) return ack?.({ error: "not_member" });
+    const at = new AccessToken(LIVEKIT_API_KEY, LIVEKIT_API_SECRET, {
+      identity: String(user.id),
+      name: user.nickname,
+      ttl: "6h",
+    });
+    at.addGrant({ roomJoin: true, room: roomId, canPublish: true, canSubscribe: true });
+    ack?.({ url: LIVEKIT_URL, token: await at.toJwt() });
   });
 
   socket.on("admin:set", ({ roomId, userId, admin }, ack) => {

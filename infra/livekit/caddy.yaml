@@ -1,0 +1,42 @@
+# Caddy (layer4 build) — terminates TLS on :443 and routes by SNI:
+#   livekit.YOUR_DOMAIN → LiveKit websocket/API (:7880)
+#   turn.YOUR_DOMAIN    → LiveKit TURN/TLS (:5349)
+# Certificates are provisioned automatically via Let's Encrypt (needs :80 open).
+logging:
+  logs:
+    default:
+      level: INFO
+storage:
+  module: file_system
+  root: /data
+apps:
+  tls:
+    certificates:
+      automate:
+        - livekit.YOUR_DOMAIN
+        - turn.YOUR_DOMAIN
+  layer4:
+    servers:
+      main:
+        listen: [":443"]
+        routes:
+          - match:
+              - tls:
+                  sni:
+                    - "turn.YOUR_DOMAIN"
+            handle:
+              - handler: tls
+              - handler: proxy
+                upstreams:
+                  - dial: ["localhost:5349"]
+          - match:
+              - tls:
+                  sni:
+                    - "livekit.YOUR_DOMAIN"
+            handle:
+              - handler: tls
+                connection_policies:
+                  - alpn: ["http/1.1"]
+              - handler: proxy
+                upstreams:
+                  - dial: ["localhost:7880"]

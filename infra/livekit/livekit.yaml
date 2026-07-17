@@ -1,0 +1,24 @@
+# LiveKit server config — replace YOUR_DOMAIN / YOUR_API_KEY / YOUR_API_SECRET
+# (see README.md step 4 for the sed one-liners). Do NOT commit filled-in copies.
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 60000
+  use_external_ip: true
+
+redis:
+  address: localhost:6379
+
+# Built-in TURN relays audio for users behind strict NATs (cellular etc.).
+# TLS on 5349 is terminated by Caddy, which fronts it on :443 via SNI.
+turn:
+  enabled: true
+  domain: turn.YOUR_DOMAIN
+  tls_port: 5349
+  udp_port: 3478
+  external_tls: true
+
+keys:
+  YOUR_API_KEY: YOUR_API_SECRET

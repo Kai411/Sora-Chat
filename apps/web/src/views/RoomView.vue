@@ -279,8 +279,25 @@ onUnmounted(() => {
           </button>
         </div>
         <div class="mt-1.5 flex items-center justify-between">
-          <p class="text-[9px] text-white/25">
-            Live audio arrives with LiveKit (phase 2)
+          <p
+            class="flex items-center gap-1 text-[9px]"
+            :class="room.audio === 'on' ? 'text-emerald-300/70' : 'text-white/25'"
+          >
+            <span
+              class="size-1.5 rounded-full"
+              :class="{
+                'bg-emerald-400': room.audio === 'on',
+                'animate-pulse bg-amber-400': room.audio === 'connecting',
+                'bg-white/20': room.audio === 'off' || room.audio === 'unavailable',
+              }"
+            ></span>
+            {{
+              room.audio === "on"
+                ? "Live audio connected"
+                : room.audio === "connecting"
+                  ? "Connecting audio…"
+                  : "Live audio not configured yet"
+            }}
           </p>
           <button
             v-if="!mySeat && room.myRequestSeat !== null"
