@@ -30,7 +30,9 @@ const memberMenu = ref<PublicUser | null>(null);
 const pickingSeatFor = ref<number | null>(null); // staff picking a seat to invite this userId to
 const toast = ref("");
 
-const mySeat = computed(() => (room.mySeatIndex >= 0 ? room.seats[room.mySeatIndex] : null));
+const mySeat = computed(() =>
+  room.mySeatIndex >= 0 ? room.seats[room.mySeatIndex] : null,
+);
 
 function flash(msg: string) {
   toast.value = msg;
@@ -111,7 +113,8 @@ function openMemberMenu(m: PublicUser) {
 
 function startInvite(userId: number) {
   memberMenu.value = null;
-  if (room.seats.some((s) => s?.id === userId)) return flash("They're already seated");
+  if (room.seats.some((s) => s?.id === userId))
+    return flash("They're already seated");
   pickingSeatFor.value = userId;
   flash("Tap an empty seat to invite them to it");
 }
@@ -142,14 +145,22 @@ onUnmounted(() => {
 
 <template>
   <div class="flex flex-col">
-    <div v-if="gone" class="flex flex-1 flex-col items-center justify-center gap-3">
+    <div
+      v-if="gone"
+      class="flex flex-1 flex-col items-center justify-center gap-3"
+    >
       <span class="text-5xl">🌬️</span>
       <p class="text-sm text-white/50">This room has closed</p>
-      <RouterLink to="/rooms" class="text-xs text-fuchsia-300">← back to rooms</RouterLink>
+      <RouterLink to="/rooms" class="text-xs text-fuchsia-300"
+        >← back to rooms</RouterLink
+      >
     </div>
 
     <!-- PIN gate -->
-    <div v-else-if="needPin" class="flex flex-1 flex-col items-center justify-center gap-4 px-10">
+    <div
+      v-else-if="needPin"
+      class="flex flex-1 flex-col items-center justify-center gap-4 px-10"
+    >
       <Icon name="lock" cls="size-12 text-white/40" />
       <p class="text-sm text-white/60">This room is locked</p>
       <input
@@ -172,11 +183,17 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-      <header class="flex items-center gap-2.5 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <span class="text-xl">{{ room.room?.icon }}</span>
+      <header
+        class="flex items-center gap-2.5 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
+      >
+        <!-- <span class="text-xl">{{ room.room?.icon }}</span> -->
         <div class="min-w-0 flex-1">
           <p class="flex items-center gap-1 truncate text-sm font-semibold">
-            <Icon v-if="room.room?.locked" name="lock" cls="size-3 shrink-0 text-white/50" />
+            <Icon
+              v-if="room.room?.locked"
+              name="lock"
+              cls="size-3 shrink-0 text-white/50"
+            />
             {{ room.room?.name ?? "…" }}
           </p>
         </div>
@@ -214,17 +231,27 @@ onUnmounted(() => {
             @click="tapSeat(i)"
           >
             <template v-if="seat">
-              <span class="relative">
-                <InitialAvatar :name="seat.nickname" :user-id="seat.id" size-class="size-11 text-base" />
-                <span class="absolute -right-0.5 -bottom-0.5 grid size-4.5 place-items-center rounded-full bg-bg">
-                  <Icon :name="seat.muted ? 'mic-off' : 'mic'" cls="size-2.5" :class="seat.muted ? 'text-red-400' : 'text-emerald-400'" />
-                </span>
-              </span>
+              <InitialAvatar
+                :name="seat.nickname"
+                :user-id="seat.id"
+                size-class="size-11 text-base"
+              />
               <span
-                class="h-3 text-[9px] font-semibold"
-                :class="roleOf(seat.id) === 'Host' ? 'text-amber-300' : roleOf(seat.id) === 'Admin' ? 'text-sky-300' : 'text-white/40'"
+                class="flex h-3 items-center gap-1 text-[9px] font-semibold"
+                :class="
+                  roleOf(seat.id) === 'Host'
+                    ? 'text-amber-300'
+                    : roleOf(seat.id) === 'Admin'
+                      ? 'text-sky-300'
+                      : 'text-white/40'
+                "
               >
                 {{ roleOf(seat.id) || i + 1 }}
+                <Icon
+                  :name="seat.muted ? 'mic-off' : 'mic'"
+                  cls="size-2.5"
+                  :class="seat.muted ? 'text-red-400' : 'text-emerald-400'"
+                />
               </span>
             </template>
             <template v-else>
@@ -240,14 +267,21 @@ onUnmounted(() => {
               >
                 <Icon name="plus" cls="size-4" />
               </span>
-              <span class="h-3 text-[9px]" :class="room.myRequestSeat === i ? 'text-amber-300' : 'text-white/25'">
+              <span
+                class="h-3 text-[9px]"
+                :class="
+                  room.myRequestSeat === i ? 'text-amber-300' : 'text-white/25'
+                "
+              >
                 {{ room.myRequestSeat === i ? "asked" : i + 1 }}
               </span>
             </template>
           </button>
         </div>
         <div class="mt-1.5 flex items-center justify-between">
-          <p class="text-[9px] text-white/25">Live audio arrives with LiveKit (phase 2)</p>
+          <p class="text-[9px] text-white/25">
+            Live audio arrives with LiveKit (phase 2)
+          </p>
           <button
             v-if="!mySeat && room.myRequestSeat !== null"
             class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-amber-300"
@@ -258,20 +292,33 @@ onUnmounted(() => {
         </div>
 
         <!-- pending seat requests (staff only) -->
-        <div v-if="room.isStaff && room.requests.length" class="mt-2 space-y-1.5">
+        <div
+          v-if="room.isStaff && room.requests.length"
+          class="mt-2 space-y-1.5"
+        >
           <div
             v-for="r in room.requests"
             :key="r.user.id"
             class="flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-xs"
           >
-            <InitialAvatar :name="r.user.nickname" :user-id="r.user.id" size-class="size-6 text-[10px]" />
+            <InitialAvatar
+              :name="r.user.nickname"
+              :user-id="r.user.id"
+              size-class="size-6 text-[10px]"
+            />
             <span class="min-w-0 flex-1 truncate text-white/70">
               {{ r.user.nickname }} wants seat {{ r.seat + 1 }}
             </span>
-            <button class="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[10px] font-semibold text-black" @click="room.grantSeat(r.user.id)">
+            <button
+              class="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[10px] font-semibold text-black"
+              @click="room.grantSeat(r.user.id)"
+            >
               Allow
             </button>
-            <button class="rounded-full bg-surface-2 px-2.5 py-0.5 text-[10px] text-white/50" @click="room.denySeat(r.user.id)">
+            <button
+              class="rounded-full bg-surface-2 px-2.5 py-0.5 text-[10px] text-white/50"
+              @click="room.denySeat(r.user.id)"
+            >
               Deny
             </button>
           </div>
@@ -280,18 +327,40 @@ onUnmounted(() => {
 
       <!-- chat: bubbles, all left-aligned (own included) -->
       <div ref="listEl" class="flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
-        <p v-if="!room.messages.length" class="py-6 text-center text-xs text-white/30">
+        <p
+          v-if="!room.messages.length"
+          class="py-6 text-center text-xs text-white/30"
+        >
           It's quiet in here… say hi
         </p>
-        <div v-for="m in room.messages" :key="m.id" class="flex items-start gap-2.5">
-          <InitialAvatar :name="m.author" :user-id="m.userId" size-class="size-8 text-xs" />
+        <div
+          v-for="m in room.messages"
+          :key="m.id"
+          class="flex items-start gap-2.5"
+        >
+          <InitialAvatar
+            :name="m.author"
+            :user-id="m.userId"
+            size-class="size-8 text-xs"
+          />
           <div class="min-w-0 flex-1">
-            <p class="text-[10px]" :class="m.userId === app.user?.id ? 'text-fuchsia-300/80' : 'text-white/40'">
+            <p
+              class="text-[10px]"
+              :class="
+                m.userId === app.user?.id
+                  ? 'text-fuchsia-300/80'
+                  : 'text-white/40'
+              "
+            >
               {{ m.author }}
             </p>
             <div
               class="mt-1 inline-block max-w-[85%] rounded-xl rounded-tl-[4px] px-3 py-1.5 text-sm leading-snug break-words"
-              :class="m.userId === app.user?.id ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500' : 'bg-surface-2'"
+              :class="
+                m.userId === app.user?.id
+                  ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
+                  : 'bg-surface-2'
+              "
             >
               {{ m.text }}
             </div>
@@ -300,7 +369,9 @@ onUnmounted(() => {
       </div>
 
       <!-- bottom action bar -->
-      <footer class="flex items-center gap-2 border-t border-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      <footer
+        class="flex items-center gap-2 border-t border-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      >
         <template v-if="!composing">
           <button
             class="flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-left text-sm text-white/30"
@@ -318,7 +389,11 @@ onUnmounted(() => {
           <button
             v-if="mySeat"
             class="grid size-10 shrink-0 place-items-center rounded-full"
-            :class="mySeat.muted ? 'bg-white text-black' : 'bg-emerald-500/20 text-emerald-300'"
+            :class="
+              mySeat.muted
+                ? 'bg-white text-black'
+                : 'bg-emerald-500/20 text-emerald-300'
+            "
             :title="mySeat.muted ? 'Unmute' : 'Mute'"
             @click="room.setMuted(!mySeat.muted)"
           >
@@ -353,28 +428,53 @@ onUnmounted(() => {
       </footer>
 
       <!-- members sheet -->
-      <div v-if="showMembers" class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60" @click.self="showMembers = false">
-        <div class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg">
+      <div
+        v-if="showMembers"
+        class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60"
+        @click.self="showMembers = false"
+      >
+        <div
+          class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg"
+        >
           <div class="flex items-center justify-between px-5 py-3">
-            <p class="text-sm font-semibold">In this room ({{ room.members.length }}/{{ ROOM_CAPACITY }})</p>
-            <button class="text-white/40" @click="showMembers = false">✕</button>
+            <p class="text-sm font-semibold">
+              In this room ({{ room.members.length }}/{{ ROOM_CAPACITY }})
+            </p>
+            <button class="text-white/40" @click="showMembers = false">
+              ✕
+            </button>
           </div>
-          <div class="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+          <div
+            class="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+          >
             <button
               v-for="m in room.members"
               :key="m.id"
               class="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left"
-              :class="room.isStaff && m.id !== app.user?.id && 'active:bg-surface'"
+              :class="
+                room.isStaff && m.id !== app.user?.id && 'active:bg-surface'
+              "
               @click="openMemberMenu(m)"
             >
-              <InitialAvatar :name="m.nickname" :user-id="m.id" size-class="size-10 text-sm" />
+              <InitialAvatar
+                :name="m.nickname"
+                :user-id="m.id"
+                size-class="size-10 text-sm"
+              />
               <span class="min-w-0 flex-1 truncate text-sm">
-                {{ m.nickname }} <span v-if="m.id === app.user?.id" class="text-white/30">(you)</span>
+                {{ m.nickname }}
+                <span v-if="m.id === app.user?.id" class="text-white/30"
+                  >(you)</span
+                >
               </span>
               <span
                 v-if="roleOf(m.id)"
                 class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                :class="roleOf(m.id) === 'Host' ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'"
+                :class="
+                  roleOf(m.id) === 'Host'
+                    ? 'bg-amber-400/15 text-amber-300'
+                    : 'bg-sky-400/15 text-sky-300'
+                "
               >
                 {{ roleOf(m.id) }}
               </span>
@@ -383,28 +483,50 @@ onUnmounted(() => {
                 name="seat"
                 cls="size-3.5 text-emerald-300"
               />
-
             </button>
           </div>
         </div>
       </div>
 
       <!-- inventory / gifts sheet -->
-      <div v-if="showInventory" class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60" @click.self="showInventory = false">
-        <div class="flex max-h-[60%] flex-col rounded-t-3xl border-t border-line bg-bg">
+      <div
+        v-if="showInventory"
+        class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60"
+        @click.self="showInventory = false"
+      >
+        <div
+          class="flex max-h-[60%] flex-col rounded-t-3xl border-t border-line bg-bg"
+        >
           <div class="flex items-center justify-between px-5 py-3">
             <p class="flex items-center gap-1.5 text-sm font-semibold">
-              <Icon name="gift" cls="size-4 text-amber-300" /> Your items ({{ app.inventory.length }})
+              <Icon name="gift" cls="size-4 text-amber-300" /> Your items ({{
+                app.inventory.length
+              }})
             </p>
-            <button class="text-white/40" @click="showInventory = false">✕</button>
+            <button class="text-white/40" @click="showInventory = false">
+              ✕
+            </button>
           </div>
-          <p class="px-5 text-[10px] text-white/35">Gifting & in-room minigames arrive in a later update</p>
-          <div class="grid flex-1 grid-cols-4 gap-2 overflow-y-auto p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-            <div v-for="(item, i) in app.inventory" :key="i" class="rounded-xl border border-line bg-surface p-2 text-center">
+          <p class="px-5 text-[10px] text-white/35">
+            Gifting & in-room minigames arrive in a later update
+          </p>
+          <div
+            class="grid flex-1 grid-cols-4 gap-2 overflow-y-auto p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+          >
+            <div
+              v-for="(item, i) in app.inventory"
+              :key="i"
+              class="rounded-xl border border-line bg-surface p-2 text-center"
+            >
               <div class="text-2xl">{{ item.icon }}</div>
-              <p class="mt-1 truncate text-[9px] text-white/50">{{ item.name }}</p>
+              <p class="mt-1 truncate text-[9px] text-white/50">
+                {{ item.name }}
+              </p>
             </div>
-            <p v-if="!app.inventory.length" class="col-span-4 py-8 text-center text-xs text-white/30">
+            <p
+              v-if="!app.inventory.length"
+              class="col-span-4 py-8 text-center text-xs text-white/30"
+            >
               Nothing yet — try the gacha ✨
             </p>
           </div>
@@ -412,13 +534,31 @@ onUnmounted(() => {
       </div>
 
       <!-- leave confirm -->
-      <div v-if="confirmLeave" class="absolute inset-0 z-30 grid place-items-center bg-black/60 px-10" @click.self="confirmLeave = false">
-        <div class="w-full rounded-2xl border border-line bg-surface p-5 text-center">
+      <div
+        v-if="confirmLeave"
+        class="absolute inset-0 z-30 grid place-items-center bg-black/60 px-10"
+        @click.self="confirmLeave = false"
+      >
+        <div
+          class="w-full rounded-2xl border border-line bg-surface p-5 text-center"
+        >
           <p class="text-sm font-semibold">Leave this room?</p>
-          <p class="mt-1 text-xs text-white/40">You'll give up your seat and roles.</p>
+          <p class="mt-1 text-xs text-white/40">
+            You'll give up your seat and roles.
+          </p>
           <div class="mt-4 flex gap-3">
-            <button class="flex-1 rounded-xl bg-surface-2 py-2.5 text-sm" @click="confirmLeave = false">Stay</button>
-            <button class="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-semibold" @click="leave">Leave</button>
+            <button
+              class="flex-1 rounded-xl bg-surface-2 py-2.5 text-sm"
+              @click="confirmLeave = false"
+            >
+              Stay
+            </button>
+            <button
+              class="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-semibold"
+              @click="leave"
+            >
+              Leave
+            </button>
           </div>
         </div>
       </div>
@@ -429,9 +569,15 @@ onUnmounted(() => {
         class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60"
         @click.self="memberMenu = null"
       >
-        <div class="rounded-t-3xl border-t border-line bg-bg p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <div
+          class="rounded-t-3xl border-t border-line bg-bg p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        >
           <div class="flex items-center justify-center gap-2">
-            <InitialAvatar :name="memberMenu.nickname" :user-id="memberMenu.id" size-class="size-8 text-xs" />
+            <InitialAvatar
+              :name="memberMenu.nickname"
+              :user-id="memberMenu.id"
+              size-class="size-8 text-xs"
+            />
             <p class="text-sm font-semibold">{{ memberMenu.nickname }}</p>
           </div>
           <div class="mt-4 space-y-2">
@@ -439,7 +585,8 @@ onUnmounted(() => {
               class="flex w-full items-center justify-center gap-2 rounded-xl bg-surface py-3 text-sm"
               @click="startInvite(memberMenu!.id)"
             >
-              <Icon name="seat" cls="size-4 text-emerald-300" /> Invite to a seat
+              <Icon name="seat" cls="size-4 text-emerald-300" /> Invite to a
+              seat
             </button>
             <button
               v-if="room.isHost"
@@ -447,9 +594,16 @@ onUnmounted(() => {
               @click="toggleAdmin(memberMenu!)"
             >
               <Icon name="shield" cls="size-4 text-sky-300" />
-              {{ room.admins.includes(memberMenu!.id) ? "Remove admin" : "Make admin (max 2)" }}
+              {{
+                room.admins.includes(memberMenu!.id)
+                  ? "Remove admin"
+                  : "Make admin (max 2)"
+              }}
             </button>
-            <button class="w-full rounded-xl border border-line py-3 text-sm text-white/50" @click="memberMenu = null">
+            <button
+              class="w-full rounded-xl border border-line py-3 text-sm text-white/50"
+              @click="memberMenu = null"
+            >
               Cancel
             </button>
           </div>
@@ -465,10 +619,16 @@ onUnmounted(() => {
         <p class="min-w-0 flex-1 text-xs text-white/80">
           The host invites you to <b>seat {{ room.inviteSeat + 1 }}</b>
         </p>
-        <button class="rounded-full bg-surface px-3 py-1.5 text-xs text-white/50" @click="room.declineInvite()">
+        <button
+          class="rounded-full bg-surface px-3 py-1.5 text-xs text-white/50"
+          @click="room.declineInvite()"
+        >
           Not now
         </button>
-        <button class="rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-black" @click="room.acceptInvite()">
+        <button
+          class="rounded-full bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-black"
+          @click="room.acceptInvite()"
+        >
           Take seat
         </button>
       </div>
