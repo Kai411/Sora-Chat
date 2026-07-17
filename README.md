@@ -26,11 +26,12 @@ Open http://localhost:5173. To test social features solo, create a **second acco
 | Direct messages | ✅ IG-style: conversation list, unread counts, live delivery, persisted |
 | DM voice calls | ✅ ring / accept / decline flow, WebRTC P2P audio |
 | Random chat / random call | ✅ matchmaking queue, skip/next, WebRTC audio |
-| Group rooms | ✅ user-created, live while occupied, text chat + member list |
+| Party rooms | ✅ user-created with categories (Music/Private/Chat), optional 4-digit PIN lock, 10-seat stage (2×5): request→host approves, host invites to seats, mute states, max-2 admins, host transfer. Voice streams land with LiveKit (phase 2) |
 | Minimized rooms | ✅ leave the page, stay in the room — dock pill with unread badge; call features force-leave |
-| Feed | ✅ public/following tabs, posts, likes, follow — persisted |
-| Gacha / economy | ✅ server-authoritative, disclosed rates, 10-pull pity, persisted inventory/coins |
+| Feed | ✅ public/following tabs, photo posts, comments, likes, follow, own posts on profile — persisted |
+| Gacha / economy | ✅ multiple banners with per-banner pools/pages, disclosed rates, 10-pull pity, persisted inventory/coins |
 | VIP | ✅ mock (coins), double daily bonus |
+| Navigation | ✅ Home · Feed · Rooms · Chat (all DMs) · Me; gacha via Home |
 
 Persistence is **SQLite** (`apps/server/sora.db`, auto-created). Zero installs locally; on Render's free tier the disk is ephemeral, so the DB resets on redeploys — move to a persistent disk or hosted Postgres for real usage.
 

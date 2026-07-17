@@ -1,6 +1,6 @@
 # Sora — Planned Features (next iteration)
 
-Status: **spec only, not yet built.** Captured 2026-07-15. These extend the current prototype (accounts on Supabase, user-created text rooms, DMs + DM calls, feed, gacha, VIP).
+Status: **built 2026-07-17** (captured 2026-07-15), with one deliberate exception: party-room **audio streams** are deferred to the LiveKit phase (the SDK install was declined for now) — seats, PIN locks, roles, and mute states are all live, but no voice flows between seats yet. Open questions at the bottom remain open.
 
 ---
 

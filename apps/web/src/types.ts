@@ -19,20 +19,57 @@ export interface Post {
   author: string;
   avatar: string;
   text: string;
+  image: string | null;
   ts: number;
   likes: number;
+  comments: number;
   liked: boolean;
   following: boolean;
   mine: boolean;
 }
+
+export interface Comment {
+  id: number;
+  userId: number;
+  author: string;
+  avatar: string;
+  text: string;
+  ts: number;
+}
+
+export type RoomCategory = "music" | "private" | "chat";
 
 export interface RoomInfo {
   id: string;
   name: string;
   icon: string;
   topic: string;
+  category: RoomCategory;
+  locked: boolean;
   creator?: PublicUser;
   members?: number;
+}
+
+export interface Seat extends PublicUser {
+  muted: boolean;
+}
+
+export interface RoomState {
+  roomId: string;
+  hostId: number;
+  admins: number[];
+  seats: (Seat | null)[];
+  requests: { user: PublicUser; seat: number }[];
+}
+
+export interface GachaBanner {
+  id: string;
+  name: string;
+  icon: string;
+  tagline: string;
+  theme: string;
+  mythic: { name: string; icon: string };
+  pool: Record<Rarity, { rate: number; items: { name: string; icon: string }[] }>;
 }
 
 export interface RoomMsg {

@@ -3,7 +3,7 @@ const tabs = [
   { to: "/", icon: "🏠", label: "Home" },
   { to: "/feed", icon: "📰", label: "Feed" },
   { to: "/rooms", icon: "🎪", label: "Rooms" },
-  { to: "/gacha", icon: "🎁", label: "Gacha" },
+  { to: "/dms", icon: "💬", label: "Chat" },
   { to: "/me", icon: "👤", label: "Me" },
 ];
 </script>

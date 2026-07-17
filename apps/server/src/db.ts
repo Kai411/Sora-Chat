@@ -27,8 +27,17 @@ db.exec(`
     id INTEGER PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id),
     text TEXT NOT NULL,
+    image TEXT,
     ts INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY,
+    post_id INTEGER NOT NULL REFERENCES posts(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    text TEXT NOT NULL,
+    ts INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_comments_post ON comments (post_id, ts);
   CREATE TABLE IF NOT EXISTS likes (
     post_id INTEGER NOT NULL,
     user_id INTEGER NOT NULL,
@@ -53,9 +62,12 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_dms_recipient ON dms (recipient, read);
 `);
 
-// Migrate pre-Supabase dev databases in place (throwaway data, but don't crash).
+// Migrate older dev databases in place (throwaway data, but don't crash).
 try {
   db.exec("ALTER TABLE users ADD COLUMN supabase_id TEXT");
+} catch {}
+try {
+  db.exec("ALTER TABLE posts ADD COLUMN image TEXT");
 } catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users (supabase_id)");
 

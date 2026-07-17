@@ -32,13 +32,8 @@ const features = [
           </p>
         </div>
       </div>
-      <div class="flex items-center gap-2">
-        <RouterLink to="/dms" class="grid size-9 place-items-center rounded-full bg-surface text-lg" title="Messages">
-          💌
-        </RouterLink>
-        <div class="flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold">
-          🪙 {{ app.coins.toLocaleString() }}
-        </div>
+      <div class="flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-sm font-semibold">
+        🪙 {{ app.coins.toLocaleString() }}
       </div>
     </header>
 

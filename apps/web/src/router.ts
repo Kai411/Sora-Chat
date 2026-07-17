@@ -11,6 +11,7 @@ export const router = createRouter({
     { path: "/rooms", component: () => import("./views/RoomsView.vue") },
     { path: "/rooms/:id", component: () => import("./views/RoomView.vue"), meta: { tabs: false } },
     { path: "/gacha", component: () => import("./views/GachaView.vue") },
+    { path: "/gacha/:id", component: () => import("./views/GachaBannerView.vue"), meta: { tabs: false } },
     { path: "/me", component: () => import("./views/ProfileView.vue") },
     { path: "/dms", component: () => import("./views/DmListView.vue") },
     { path: "/dms/:id", component: () => import("./views/DmChatView.vue"), meta: { tabs: false } },

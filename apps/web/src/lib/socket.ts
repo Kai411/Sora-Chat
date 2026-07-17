@@ -6,3 +6,6 @@ import { io, type Socket } from "socket.io-client";
 const url = import.meta.env.VITE_SERVER_URL ?? "/";
 
 export const socket: Socket = io(url, { autoConnect: false });
+
+/** Origin for server-hosted assets (e.g. /uploads images); "" = same origin. */
+export const serverBase: string = import.meta.env.VITE_SERVER_URL ?? "";

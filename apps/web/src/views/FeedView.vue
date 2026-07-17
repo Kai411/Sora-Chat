@@ -2,13 +2,20 @@
 import { onMounted, onUnmounted, ref, watch } from "vue";
 import { socket } from "../lib/socket";
 import { useAppStore } from "../stores/app";
+import { pickImage } from "../lib/image";
+import PostCard from "../components/PostCard.vue";
+import CommentsSheet from "../components/CommentsSheet.vue";
 import type { Post } from "../types";
 
 const app = useAppStore();
 const tab = ref<"public" | "following">("public");
 const feed = ref<Post[]>([]);
 const draft = ref("");
+const draftImage = ref<string | null>(null);
 const composing = ref(false);
+const posting = ref(false);
+const error = ref("");
+const commentsFor = ref<Post | null>(null);
 
 async function load() {
   feed.value = await socket.emitWithAck("feed:list", { tab: tab.value });
@@ -20,40 +27,45 @@ function onNew({ post }: { post: Post }) {
   }
 }
 
+function onCommented({ postId, comments }: { postId: number; comments: number }) {
+  const p = feed.value.find((x) => x.id === postId);
+  if (p) p.comments = comments;
+}
+
+async function attach() {
+  draftImage.value = (await pickImage()) ?? draftImage.value;
+}
+
 async function publish() {
-  const text = draft.value.trim();
-  if (!text) return;
-  const post = await socket.emitWithAck("feed:post", { text });
-  if (post && !feed.value.some((p) => p.id === post.id)) feed.value.unshift(post);
-  draft.value = "";
-  composing.value = false;
+  if (posting.value) return;
+  posting.value = true;
+  error.value = "";
+  try {
+    const res = await socket.emitWithAck("feed:post", { text: draft.value.trim(), image: draftImage.value });
+    if (res?.error) return void (error.value = res.error);
+    if (res && !feed.value.some((p) => p.id === res.id)) feed.value.unshift(res);
+    draft.value = "";
+    draftImage.value = null;
+    composing.value = false;
+  } finally {
+    posting.value = false;
+  }
 }
 
-async function like(post: Post) {
-  const res = await socket.emitWithAck("feed:like", { id: post.id });
-  if (res) Object.assign(post, res);
-}
-
-async function follow(post: Post) {
-  const res = await socket.emitWithAck("user:follow", { userId: post.userId });
-  if (!res) return;
-  for (const p of feed.value) if (p.userId === res.userId) p.following = res.following;
-}
-
-function ago(ts: number) {
-  const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+function onFollowed(userId: number, following: boolean) {
+  for (const p of feed.value) if (p.userId === userId) p.following = following;
 }
 
 watch(tab, load);
 onMounted(() => {
   socket.on("feed:new", onNew);
+  socket.on("feed:commented", onCommented);
   load();
 });
-onUnmounted(() => socket.off("feed:new", onNew));
+onUnmounted(() => {
+  socket.off("feed:new", onNew);
+  socket.off("feed:commented", onCommented);
+});
 </script>
 
 <template>
@@ -77,31 +89,14 @@ onUnmounted(() => socket.off("feed:new", onNew));
       <p v-if="!feed.length" class="py-10 text-center text-xs text-white/30">
         {{ tab === "following" ? "Follow people to fill this tab ✨" : "Nothing here yet — be the first to post!" }}
       </p>
-      <article v-for="p in feed" :key="p.id" class="rounded-2xl border border-line bg-surface p-4">
-        <div class="flex items-center gap-2.5">
-          <span class="grid size-9 place-items-center rounded-full bg-surface-2 text-lg">{{ p.avatar }}</span>
-          <div class="flex-1">
-            <p class="text-sm font-semibold">{{ p.author }}</p>
-            <p class="text-[10px] text-white/35">{{ ago(p.ts) }}</p>
-          </div>
-          <button
-            v-if="!p.mine"
-            class="rounded-full px-3 py-1 text-xs font-medium"
-            :class="p.following ? 'bg-surface-2 text-white/50' : 'bg-fuchsia-500/15 text-fuchsia-300'"
-            @click="follow(p)"
-          >
-            {{ p.following ? "Following" : "+ Follow" }}
-          </button>
-        </div>
-        <p class="mt-3 text-sm leading-relaxed text-white/90">{{ p.text }}</p>
-        <button
-          class="mt-3 flex items-center gap-1.5 text-xs"
-          :class="p.liked ? 'text-pink-400' : 'text-white/40'"
-          @click="like(p)"
-        >
-          {{ p.liked ? "❤️" : "🤍" }} {{ p.likes }}
-        </button>
-      </article>
+      <PostCard
+        v-for="p in feed"
+        :key="p.id"
+        :post="p"
+        show-follow
+        @comments="commentsFor = $event"
+        @followed="onFollowed"
+      />
     </div>
 
     <button
@@ -114,14 +109,20 @@ onUnmounted(() => socket.off("feed:new", onNew));
     <div v-if="composing" class="absolute inset-0 z-10 flex flex-col bg-bg/95 p-5 backdrop-blur">
       <div class="flex items-center justify-between pt-[env(safe-area-inset-top)]">
         <button class="text-sm text-white/50" @click="composing = false">Cancel</button>
-        <button
-          class="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-1.5 text-sm font-semibold disabled:opacity-40"
-          :disabled="!draft.trim()"
-          @click="publish"
-        >
-          Post
-        </button>
+        <div class="flex items-center gap-3">
+          <button class="grid size-9 place-items-center rounded-full bg-surface text-lg" title="Add photo" @click="attach">
+            📷
+          </button>
+          <button
+            class="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-1.5 text-sm font-semibold disabled:opacity-40"
+            :disabled="posting || (!draft.trim() && !draftImage)"
+            @click="publish"
+          >
+            {{ posting ? "Posting…" : "Post" }}
+          </button>
+        </div>
       </div>
+      <p v-if="error" class="mt-2 text-xs text-red-300">{{ error }}</p>
       <textarea
         v-model="draft"
         maxlength="500"
@@ -129,6 +130,17 @@ onUnmounted(() => socket.off("feed:new", onNew));
         class="mt-4 flex-1 resize-none bg-transparent text-base outline-none placeholder:text-white/25"
         autofocus
       ></textarea>
+      <div v-if="draftImage" class="relative mb-2">
+        <img :src="draftImage" class="max-h-52 w-full rounded-xl object-cover" alt="" />
+        <button
+          class="absolute top-2 right-2 grid size-7 place-items-center rounded-full bg-black/70 text-xs"
+          @click="draftImage = null"
+        >
+          ✕
+        </button>
+      </div>
     </div>
+
+    <CommentsSheet v-if="commentsFor" :post="commentsFor" @close="commentsFor = null" />
   </div>
 </template>

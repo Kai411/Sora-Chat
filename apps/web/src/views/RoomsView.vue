@@ -2,17 +2,27 @@
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { socket } from "../lib/socket";
-import type { RoomInfo } from "../types";
+import type { RoomCategory, RoomInfo } from "../types";
 
 const ICONS = ["🎪", "🛋️", "🎵", "🎮", "🌙", "☕", "📚", "🌈"];
+const CATEGORIES: { id: RoomCategory; label: string; icon: string }[] = [
+  { id: "music", label: "Music Room", icon: "🎵" },
+  { id: "private", label: "Private Room", icon: "🔒" },
+  { id: "chat", label: "Chat Room", icon: "💬" },
+];
 
 const router = useRouter();
 const rooms = ref<RoomInfo[]>([]);
 const creating = ref(false);
+const category = ref<RoomCategory>("chat");
 const name = ref("");
 const topic = ref("");
 const icon = ref(ICONS[0]);
+const locked = ref(false);
+const pin = ref("");
 const error = ref("");
+
+const categoryLabel = (id: RoomCategory) => CATEGORIES.find((c) => c.id === id)?.label ?? id;
 
 async function load() {
   rooms.value = await socket.emitWithAck("rooms:list");
@@ -20,14 +30,18 @@ async function load() {
 
 async function create() {
   error.value = "";
+  if (locked.value && !/^\d{4}$/.test(pin.value)) return (error.value = "PIN must be exactly 4 digits");
   const res = await socket.emitWithAck("rooms:create", {
+    category: category.value,
     name: name.value,
     icon: icon.value,
     topic: topic.value,
+    pin: locked.value ? pin.value : null,
   });
   if (res?.error) return (error.value = res.error);
   creating.value = false;
-  name.value = topic.value = "";
+  name.value = topic.value = pin.value = "";
+  locked.value = false;
   router.push(`/rooms/${res.room.id}`);
 }
 
@@ -39,7 +53,7 @@ onMounted(load);
     <div class="flex-1 overflow-y-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-6">
       <div class="flex items-center justify-between">
         <div>
-          <h1 class="text-xl font-bold">Chat Rooms</h1>
+          <h1 class="text-xl font-bold">Party Rooms</h1>
           <p class="mt-0.5 text-xs text-white/40">Made by people here, alive while someone's inside</p>
         </div>
         <button class="rounded-full bg-surface px-3 py-1.5 text-xs text-white/60" @click="load">↻</button>
@@ -48,7 +62,7 @@ onMounted(load);
       <div v-if="!rooms.length" class="flex flex-col items-center gap-3 py-16 text-center">
         <span class="text-5xl">🎪</span>
         <p class="text-sm text-white/50">No rooms right now</p>
-        <p class="text-xs text-white/30">Be the one who starts tonight's conversation</p>
+        <p class="text-xs text-white/30">Be the one who starts tonight's party</p>
       </div>
 
       <div class="mt-5 space-y-3">
@@ -60,8 +74,11 @@ onMounted(load);
         >
           <span class="grid size-12 shrink-0 place-items-center rounded-xl bg-surface-2 text-2xl">{{ r.icon }}</span>
           <div class="min-w-0 flex-1">
-            <p class="font-semibold">{{ r.name }}</p>
+            <p class="truncate font-semibold">
+              <span v-if="r.locked" class="mr-0.5">🔒</span>{{ r.name }}
+            </p>
             <p class="truncate text-xs text-white/40">
+              <span class="mr-1 rounded bg-surface-2 px-1.5 py-px text-[10px] text-white/60">{{ categoryLabel(r.category) }}</span>
               {{ r.topic || `by ${r.creator?.nickname}` }}
             </p>
           </div>
@@ -79,9 +96,23 @@ onMounted(load);
       ＋
     </button>
 
-    <div v-if="creating" class="absolute inset-0 z-10 flex flex-col justify-center bg-bg/95 p-6 backdrop-blur">
+    <div v-if="creating" class="absolute inset-0 z-10 flex flex-col justify-center overflow-y-auto bg-bg/95 p-6 backdrop-blur">
       <h2 class="text-lg font-bold">Create a room</h2>
       <div class="mt-4 space-y-4">
+        <div>
+          <label class="mb-2 block text-xs font-medium text-white/50">CATEGORY</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              v-for="c in CATEGORIES"
+              :key="c.id"
+              class="rounded-xl bg-surface py-2.5 text-xs font-medium text-white/60"
+              :class="category === c.id && 'ring-2 ring-emerald-400 bg-surface-2 !text-white'"
+              @click="category = c.id"
+            >
+              <span class="block text-lg">{{ c.icon }}</span>{{ c.label }}
+            </button>
+          </div>
+        </div>
         <div class="grid grid-cols-8 gap-1.5">
           <button
             v-for="i in ICONS"
@@ -93,19 +124,44 @@ onMounted(load);
             {{ i }}
           </button>
         </div>
-        <input
-          v-model="name"
-          maxlength="30"
-          placeholder="Room name"
-          class="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none placeholder:text-white/25 focus:border-emerald-400/50"
-        />
+        <div class="flex items-center gap-2 rounded-xl border border-line bg-surface px-3">
+          <span class="shrink-0 text-xs text-white/40">{{ categoryLabel(category) }} ·</span>
+          <input
+            v-model="name"
+            maxlength="30"
+            placeholder="room name"
+            class="w-full bg-transparent py-3 text-sm outline-none placeholder:text-white/25"
+          />
+        </div>
         <input
           v-model="topic"
           maxlength="60"
           placeholder="Topic (optional)"
           class="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none placeholder:text-white/25 focus:border-emerald-400/50"
-          @keydown.enter="create"
         />
+        <div class="flex items-center justify-between rounded-xl border border-line bg-surface px-4 py-3">
+          <div>
+            <p class="text-sm">🔒 Lock with PIN</p>
+            <p class="text-[10px] text-white/35">4 digits · will become a VIP perk later</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              v-if="locked"
+              v-model="pin"
+              maxlength="4"
+              inputmode="numeric"
+              placeholder="0000"
+              class="w-16 rounded-lg bg-surface-2 px-2 py-1.5 text-center font-mono text-sm outline-none"
+            />
+            <button
+              class="h-6 w-11 rounded-full transition-colors"
+              :class="locked ? 'bg-emerald-500' : 'bg-surface-2'"
+              @click="locked = !locked"
+            >
+              <span class="block size-5 rounded-full bg-white transition-transform" :class="locked ? 'translate-x-5' : 'translate-x-0.5'"></span>
+            </button>
+          </div>
+        </div>
         <p v-if="error" class="text-xs text-red-300">{{ error }}</p>
         <div class="flex gap-3">
           <button class="flex-1 rounded-xl border border-line bg-surface py-3 text-sm" @click="creating = false">
