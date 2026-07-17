@@ -9,7 +9,7 @@ const router = useRouter();
 <template>
   <div
     v-if="room.room"
-    class="anim-pop-in absolute right-3 bottom-16 left-3 z-20 flex items-center gap-3 rounded-2xl border border-fuchsia-400/30 bg-surface-2/95 px-3.5 py-2.5 shadow-xl backdrop-blur"
+    class="anim-pop-in mx-3 my-2 flex shrink-0 items-center gap-3 rounded-2xl border border-fuchsia-400/30 bg-surface-2/95 px-3.5 py-2.5 shadow-xl"
   >
     <button class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="router.push(`/rooms/${room.room.id}`)">
       <span class="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-xl">{{ room.room.icon }}</span>
