@@ -282,12 +282,12 @@ onUnmounted(() => {
         </p>
         <div v-for="m in room.messages" :key="m.id" class="flex items-start gap-2.5">
           <InitialAvatar :name="m.author" :user-id="m.userId" size-class="size-8 text-xs" />
-          <div class="min-w-0">
+          <div class="min-w-0 flex-1">
             <p class="text-[10px]" :class="m.userId === app.user?.id ? 'text-fuchsia-300/80' : 'text-white/40'">
               {{ m.author }}
             </p>
             <div
-              class="mt-0.5 inline-block max-w-[80%] rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm"
+              class="mt-1 inline-block max-w-[85%] rounded-xl rounded-tl-[4px] px-3 py-1.5 text-sm leading-snug break-words"
               :class="m.userId === app.user?.id ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500' : 'bg-surface-2'"
             >
               {{ m.text }}
