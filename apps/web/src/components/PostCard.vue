@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useRouter } from "vue-router";
 import { serverBase, socket } from "../lib/socket";
+import Avatar from "./Avatar.vue";
 import type { Post } from "../types";
 
 const props = defineProps<{ post: Post; showFollow?: boolean }>();
 const emit = defineEmits<{ comments: [post: Post]; followed: [userId: number, following: boolean] }>();
+const router = useRouter();
 
 function ago(ts: number) {
   const m = Math.max(0, Math.round((Date.now() - ts) / 60000));
@@ -27,11 +30,13 @@ async function follow() {
 <template>
   <article class="rounded-2xl border border-line bg-surface p-4">
     <div class="flex items-center gap-2.5">
-      <span class="grid size-9 place-items-center rounded-full bg-surface-2 text-lg">{{ post.avatar }}</span>
-      <div class="flex-1">
-        <p class="text-sm font-semibold">{{ post.author }}</p>
-        <p class="text-[10px] text-white/35">{{ ago(post.ts) }}</p>
-      </div>
+      <button class="flex min-w-0 flex-1 items-center gap-2.5 text-left" @click="router.push(`/u/${post.userId}`)">
+        <Avatar :avatar="post.avatar" :name="post.author" :user-id="post.userId" size-class="size-9 text-lg" />
+        <span class="min-w-0">
+          <span class="block truncate text-sm font-semibold">{{ post.author }}</span>
+          <span class="block text-[10px] text-white/35">{{ ago(post.ts) }}</span>
+        </span>
+      </button>
       <button
         v-if="showFollow && !post.mine"
         class="rounded-full px-3 py-1 text-xs font-medium"

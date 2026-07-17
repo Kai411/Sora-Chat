@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { socket } from "../lib/socket";
+import Avatar from "../components/Avatar.vue";
 import type { Conversation } from "../types";
 
 const conversations = ref<Conversation[]>([]);
@@ -46,7 +47,7 @@ onUnmounted(() => socket.off("dm:new", onNew));
         :to="`/dms/${c.user.id}`"
         class="flex items-center gap-3 rounded-2xl p-3 transition-colors active:bg-surface"
       >
-        <span class="grid size-12 shrink-0 place-items-center rounded-full bg-surface-2 text-2xl">{{ c.user.avatar }}</span>
+        <Avatar :avatar="c.user.avatar" :name="c.user.nickname" :user-id="c.user.id" size-class="size-12 text-2xl" />
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold">
             {{ c.user.nickname }}

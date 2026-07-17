@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { hasStoredSession } from "./lib/supabase";
 import { useRoomStore } from "./stores/room";
+import { useAppStore } from "./stores/app";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -12,7 +13,8 @@ export const router = createRouter({
     { path: "/rooms/:id", component: () => import("./views/RoomView.vue"), meta: { tabs: false } },
     { path: "/gacha", component: () => import("./views/GachaView.vue") },
     { path: "/gacha/:id", component: () => import("./views/GachaBannerView.vue"), meta: { tabs: false } },
-    { path: "/me", component: () => import("./views/ProfileView.vue") },
+    { path: "/me", redirect: () => { const a = useAppStore(); return a.user ? `/u/${a.user.id}` : "/"; } },
+    { path: "/u/:id", component: () => import("./views/UserProfileView.vue") },
     { path: "/dms", component: () => import("./views/DmListView.vue") },
     { path: "/dms/:id", component: () => import("./views/DmChatView.vue"), meta: { tabs: false } },
     { path: "/random-chat", component: () => import("./views/RandomChatView.vue"), meta: { tabs: false } },
@@ -23,7 +25,9 @@ export const router = createRouter({
 
 router.beforeEach((to) => {
   if (to.path !== "/login" && !hasStoredSession()) return "/login";
-  // Product rule: voice/call features can't run while docked in a room.
+  // Random call is unavailable while in a party room (stay where you are).
+  if (to.path === "/random-call" && useRoomStore().room) return false;
+  // DM calls force-leave a docked room.
   if (to.meta.callFeature) {
     const room = useRoomStore();
     if (room.room) room.leave();

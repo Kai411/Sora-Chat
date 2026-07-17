@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import type { Room as LiveKitRoom } from "livekit-client";
 import { socket } from "../lib/socket";
 import { useAppStore } from "./app";
-import type { PublicUser, RoomInfo, RoomMsg, RoomState, Seat } from "../types";
+import type { PublicUser, RoomInfo, RoomMsg, RoomState, Seat, SeatLayout } from "../types";
 
 // LiveKit connection lives at module scope (non-reactive) so audio survives
 // minimizing the room; only the status string is reactive state.
@@ -102,6 +102,9 @@ export const useRoomStore = defineStore("room", {
     unread: 0,
     viewing: false, // true while RoomView is on screen
     audio: "off" as RoomAudioStatus,
+    layout: "grid" as SeatLayout,
+    locked: false,
+    kickedFrom: null as string | null, // room name we were just kicked from
   }),
   getters: {
     myUserId(): number {
@@ -139,6 +142,12 @@ export const useRoomStore = defineStore("room", {
       socket.on("room:seatInvite", ({ roomId, seat }: { roomId: string; seat: number }) => {
         if (roomId === this.room?.id) this.inviteSeat = seat;
       });
+      socket.on("room:kicked", ({ roomId, roomName }: { roomId: string; roomName: string }) => {
+        if (roomId !== this.room?.id) return;
+        this.disconnectAudio();
+        this.$reset();
+        this.kickedFrom = roomName;
+      });
     },
     /** Returns true on success, or the join error string ("pin_required" | "pin_wrong"). */
     async join(roomId: string, pin?: string): Promise<true | string> {
@@ -161,6 +170,8 @@ export const useRoomStore = defineStore("room", {
       this.hostId = state.hostId;
       this.admins = state.admins;
       this.requests = state.requests;
+      this.layout = state.layout ?? "grid";
+      this.locked = !!state.locked;
     },
     leave() {
       if (this.room) socket.emit("room:leave", { roomId: this.room.id });
@@ -215,12 +226,12 @@ export const useRoomStore = defineStore("room", {
         lkRoom = null;
       }
     },
-    /** Publish the mic only while seated & unmuted; otherwise stay listen-only. */
+    /** Publish the mic only while seated, unmuted, and not force-muted. */
     async syncMic() {
       if (!lkRoom || this.audio !== "on") return;
       const onSeat = this.seats.some((s) => s?.id === this.myUserId);
       const seat = this.seats.find((s) => s?.id === this.myUserId);
-      const enable = !!seat && !seat.muted;
+      const enable = !!seat && !seat.muted && !seat.blocked;
       // Route to loudspeaker while a pure listener; publishing needs record mode.
       routeAudio(onSeat);
       try {
@@ -275,6 +286,31 @@ export const useRoomStore = defineStore("room", {
       if (!this.room) return null;
       const res = await socket.emitWithAck("admin:set", { roomId: this.room.id, userId, admin });
       return res?.error ?? null;
+    },
+    forceMute(userId: number, blocked: boolean) {
+      if (this.room) socket.emit("seat:forceMute", { roomId: this.room.id, userId, blocked });
+    },
+    removeFromSeat(userId: number) {
+      if (this.room) socket.emit("seat:remove", { roomId: this.room.id, userId });
+    },
+    kick(userId: number) {
+      if (this.room) socket.emit("room:kick", { roomId: this.room.id, userId });
+    },
+    async setPin(pin: string | null): Promise<string | null> {
+      if (!this.room) return null;
+      const res = await socket.emitWithAck("room:setPin", { roomId: this.room.id, pin });
+      return res?.error ?? null;
+    },
+    setLayout(layout: SeatLayout) {
+      if (this.room) socket.emit("room:layout", { roomId: this.room.id, layout });
+    },
+    /** Host > admin > member; you can't moderate yourself or your rank. */
+    canModerate(targetId: number): boolean {
+      const me = this.myUserId;
+      if (me === targetId) return false;
+      if (this.hostId === me) return true;
+      if (this.admins.includes(me)) return targetId !== this.hostId && !this.admins.includes(targetId);
+      return false;
     },
   },
 });

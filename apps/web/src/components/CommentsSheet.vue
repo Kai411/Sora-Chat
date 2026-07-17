@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { socket } from "../lib/socket";
+import Avatar from "./Avatar.vue";
 import type { Comment, Post } from "../types";
 
 const props = defineProps<{ post: Post }>();
@@ -47,7 +48,7 @@ onMounted(async () => {
           No comments yet — say something nice ✨
         </p>
         <div v-for="c in comments" :key="c.id" class="flex gap-2.5">
-          <span class="grid size-8 shrink-0 place-items-center rounded-full bg-surface-2 text-base">{{ c.avatar }}</span>
+          <Avatar :avatar="c.avatar" :name="c.author" :user-id="c.userId" size-class="size-8 text-base" />
           <div class="min-w-0">
             <p class="text-[10px] text-white/40">{{ c.author }} · {{ ago(c.ts) }}</p>
             <p class="text-sm text-white/90">{{ c.text }}</p>

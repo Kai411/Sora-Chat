@@ -60,6 +60,17 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_dms_pair ON dms (sender, recipient, ts);
   CREATE INDEX IF NOT EXISTS idx_dms_recipient ON dms (recipient, read);
+  CREATE TABLE IF NOT EXISTS visits (
+    visitor INTEGER NOT NULL REFERENCES users(id),
+    visited INTEGER NOT NULL REFERENCES users(id),
+    ts INTEGER NOT NULL,
+    PRIMARY KEY (visitor, visited)
+  );
+  CREATE TABLE IF NOT EXISTS avatar_owned (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    avatar_id TEXT NOT NULL,
+    PRIMARY KEY (user_id, avatar_id)
+  );
 `);
 
 // Migrate older dev databases in place (throwaway data, but don't crash).

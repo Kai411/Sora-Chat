@@ -1,8 +1,9 @@
 import "./env";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync, createReadStream } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, createReadStream, readdirSync } from "node:fs";
 import { basename, extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server, type Socket } from "socket.io";
 import { AccessToken } from "livekit-server-sdk";
 import { db, getUserById, publicUser, type UserRow } from "./db";
@@ -26,8 +27,11 @@ const CATEGORY_ICONS: Record<RoomCategory, string> = { music: "🎵", private: "
 
 interface SeatState {
   userId: number;
-  muted: boolean;
+  muted: boolean; // self-mute
+  blocked: boolean; // force-muted by host/admin
 }
+
+type SeatLayout = "grid" | "couple";
 
 interface LiveRoom {
   id: string;
@@ -42,6 +46,8 @@ interface LiveRoom {
   admins: number[]; // max 2
   requests: Map<number, number>; // userId -> wanted seat index
   invites: Map<number, number>; // userId -> offered seat index
+  banned: Set<number>; // kicked users can't re-enter
+  layout: SeatLayout;
 }
 
 interface RoomMsg {
@@ -212,6 +218,47 @@ const listComments = db.prepare(
 );
 const countComments = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM comments WHERE post_id = ?");
 
+// Preset profile pictures — image files live in apps/web/public/avatars/ as
+// <id>.<ext> (a01 … a12), any of png/jpg/jpeg/webp. No custom uploads; bought
+// with coins. The extension for each slot is resolved from disk at startup so
+// you can drop in whichever format you have.
+const AVATAR_DIR = fileURLToPath(new URL("../../web/public/avatars", import.meta.url));
+const ALLOWED_AVATAR_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+function avatarExtensions(): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    for (const file of readdirSync(AVATAR_DIR)) {
+      const ext = extname(file).toLowerCase();
+      if (ALLOWED_AVATAR_EXT.has(ext)) map.set(basename(file, extname(file)), file);
+    }
+  } catch {
+    /* folder not created yet — fall back to .png below */
+  }
+  return map;
+}
+
+// Rebuilt per request so freshly-dropped image files appear without a restart.
+function avatarCatalog() {
+  const found = avatarExtensions();
+  return Array.from({ length: 12 }, (_, i) => {
+    const id = `a${String(i + 1).padStart(2, "0")}`;
+    return { id, src: `/avatars/${found.get(id) ?? `${id}.png`}`, price: i < 4 ? 300 : i < 8 ? 600 : 1000 };
+  });
+}
+
+const ownedAvatars = db.prepare("SELECT avatar_id FROM avatar_owned WHERE user_id = ?");
+const addOwnedAvatar = db.prepare("INSERT OR IGNORE INTO avatar_owned (user_id, avatar_id) VALUES (?, ?)");
+const setUserAvatar = db.prepare("UPDATE users SET avatar = ? WHERE id = ?");
+const recordVisit = db.prepare("INSERT OR REPLACE INTO visits (visitor, visited, ts) VALUES (?, ?, ?)");
+const listVisitors = db.prepare("SELECT visitor AS uid, ts FROM visits WHERE visited = ? ORDER BY ts DESC LIMIT 50");
+const listVisited = db.prepare("SELECT visited AS uid, ts FROM visits WHERE visitor = ? ORDER BY ts DESC LIMIT 50");
+const followerCount = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM follows WHERE followee = ?");
+const followingCount = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM follows WHERE follower = ?");
+const postCount = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM posts WHERE user_id = ?");
+const listFollowers = db.prepare("SELECT follower AS uid FROM follows WHERE followee = ? LIMIT 100");
+const listFollowing = db.prepare("SELECT followee AS uid FROM follows WHERE follower = ? LIMIT 100");
+
 const insertDm = db.prepare("INSERT INTO dms (sender, recipient, text, ts) VALUES (?, ?, ?, ?)");
 const dmHistory = db.prepare(
   `SELECT id, sender, text, ts FROM dms
@@ -321,10 +368,12 @@ function roomState(r: LiveRoom) {
     roomId: r.id,
     hostId: r.hostId,
     admins: [...r.admins],
+    layout: r.layout,
+    locked: !!r.pin,
     seats: r.seats.map((s) => {
       if (!s) return null;
       const u = getUserById.get(s.userId);
-      return u ? { ...publicUser(u), muted: s.muted } : null;
+      return u ? { ...publicUser(u), muted: s.muted, blocked: s.blocked } : null;
     }),
     requests: [...r.requests.entries()]
       .map(([userId, seat]) => {
@@ -343,10 +392,18 @@ function isStaff(r: LiveRoom, userId: number) {
   return r.hostId === userId || r.admins.includes(userId);
 }
 
+/** Host can moderate everyone but themselves; admins only regular members. */
+function canModerate(r: LiveRoom, actorId: number, targetId: number) {
+  if (actorId === targetId) return false;
+  if (r.hostId === actorId) return true;
+  if (r.admins.includes(actorId)) return targetId !== r.hostId && !r.admins.includes(targetId);
+  return false;
+}
+
 function seatUser(r: LiveRoom, userId: number, seat: number): boolean {
   if (seat < 0 || seat >= SEAT_COUNT || r.seats[seat]) return false;
   if (r.seats.some((s) => s?.userId === userId)) return false;
-  r.seats[seat] = { userId, muted: false };
+  r.seats[seat] = { userId, muted: false, blocked: false };
   r.requests.delete(userId);
   r.invites.delete(userId);
   return true;
@@ -490,6 +547,8 @@ io.on("connection", (socket: Socket) => {
       admins: [],
       requests: new Map(),
       invites: new Map(),
+      banned: new Set(),
+      layout: "grid",
     };
     rooms.set(room.id, room);
     roomMessages.set(room.id, []);
@@ -503,6 +562,7 @@ io.on("connection", (socket: Socket) => {
   socket.on("room:join", ({ roomId, pin }, ack) => {
     const r = rooms.get(roomId);
     if (!user || !r) return ack?.(null);
+    if (r.banned.has(user.id)) return ack?.({ error: "banned" });
     if (r.pin && user.id !== r.hostId) {
       if (pin === undefined || pin === null || pin === "") return ack?.({ error: "pin_required" });
       if (String(pin) !== r.pin) return ack?.({ error: "pin_wrong" });
@@ -642,6 +702,64 @@ io.on("connection", (socket: Socket) => {
     });
     at.addGrant({ roomJoin: true, room: roomId, canPublish: true, canSubscribe: true });
     ack?.({ url: LIVEKIT_URL, token: await at.toJwt() });
+  });
+
+  // --- room moderation (host/admin) ---------------------------------------
+
+  socket.on("seat:forceMute", ({ roomId, userId, blocked }) => {
+    const r = rooms.get(roomId);
+    const target = Number(userId);
+    if (!user || !r || !canModerate(r, user.id, target)) return;
+    const seat = r.seats.find((s) => s?.userId === target);
+    if (!seat) return;
+    seat.blocked = !!blocked;
+    broadcastRoom(r);
+  });
+
+  socket.on("seat:remove", ({ roomId, userId }) => {
+    const r = rooms.get(roomId);
+    const target = Number(userId);
+    if (!user || !r || !canModerate(r, user.id, target)) return;
+    const i = r.seats.findIndex((s) => s?.userId === target);
+    if (i < 0) return;
+    r.seats[i] = null;
+    broadcastRoom(r);
+  });
+
+  socket.on("room:kick", ({ roomId, userId }) => {
+    const r = rooms.get(roomId);
+    const target = Number(userId);
+    if (!user || !r || !canModerate(r, user.id, target)) return;
+    r.banned.add(target);
+    for (const sid of userSockets(target)) {
+      const s = io.sockets.sockets.get(sid);
+      if (s?.rooms.has(`room:${roomId}`)) {
+        s.leave(`room:${roomId}`);
+        io.to(sid).emit("room:kicked", { roomId, roomName: r.name });
+      }
+    }
+    reconcileRoom(roomId);
+  });
+
+  socket.on("room:setPin", ({ roomId, pin }, ack) => {
+    const r = rooms.get(roomId);
+    if (!user || !r || r.hostId !== user.id) return ack?.({ error: "Only the host can lock the room" });
+    if (pin === null || pin === undefined || pin === "") {
+      r.pin = null;
+    } else {
+      if (!/^\d{4}$/.test(String(pin))) return ack?.({ error: "PIN must be exactly 4 digits" });
+      r.pin = String(pin);
+    }
+    broadcastRoom(r);
+    ack?.({ locked: !!r.pin });
+  });
+
+  socket.on("room:layout", ({ roomId, layout }) => {
+    const r = rooms.get(roomId);
+    if (!user || !r || r.hostId !== user.id) return;
+    if (layout !== "grid" && layout !== "couple") return;
+    r.layout = layout;
+    broadcastRoom(r);
   });
 
   socket.on("admin:set", ({ roomId, userId, admin }, ack) => {
@@ -810,6 +928,87 @@ io.on("connection", (socket: Socket) => {
     const comment = { id: Number(info.lastInsertRowid), text: t, ts, userId: user.id, author: user.nickname, avatar: user.avatar };
     io.emit("feed:commented", { postId: pid, comments: countComments.get(pid)!.c });
     ack?.(comment);
+  });
+
+  // --- user profiles ---------------------------------------------------------
+
+  socket.on("user:profile", ({ userId }, ack) => {
+    const target = getUserById.get(Number(userId));
+    if (!user || !target) return ack?.(null);
+    if (target.id !== user.id) recordVisit.run(user.id, target.id, Date.now());
+    ack?.({
+      user: publicUser(target),
+      followers: followerCount.get(target.id)!.c,
+      following: followingCount.get(target.id)!.c,
+      posts: postCount.get(target.id)!.c,
+      isFollowing: !!hasFollow.get(user.id, target.id),
+      followsYou: !!hasFollow.get(target.id, user.id),
+    });
+  });
+
+  socket.on("user:follows", ({ userId }, ack) => {
+    const target = getUserById.get(Number(userId));
+    if (!user || !target) return ack?.(null);
+    const hydrate = (rows: any[]) =>
+      rows.map((r) => getUserById.get(r.uid)).filter(Boolean).map((u) => publicUser(u!));
+    ack?.({
+      followers: hydrate(listFollowers.all(target.id) as any[]),
+      following: hydrate(listFollowing.all(target.id) as any[]),
+    });
+  });
+
+  socket.on("user:visits", (ack) => {
+    if (!user) return ack?.(null);
+    const hydrate = (rows: any[]) =>
+      rows
+        .map((r) => {
+          const u = getUserById.get(r.uid);
+          return u ? { user: publicUser(u), ts: r.ts } : null;
+        })
+        .filter(Boolean);
+    ack?.({
+      visitors: hydrate(listVisitors.all(user.id) as any[]),
+      visited: hydrate(listVisited.all(user.id) as any[]),
+    });
+  });
+
+  // --- avatar shop (preset profile pictures, bought with coins) --------------
+
+  socket.on("avatar:catalog", (ack) => {
+    if (!user) return ack?.(null);
+    ack?.({
+      items: avatarCatalog(),
+      owned: (ownedAvatars.all(user.id) as any[]).map((r) => r.avatar_id),
+      current: user.avatar,
+    });
+  });
+
+  socket.on("avatar:buy", ({ id }, ack) => {
+    const u = refresh();
+    const item = avatarCatalog().find((a) => a.id === id);
+    if (!u || !item) return ack?.({ error: "Unknown avatar" });
+    const owned = (ownedAvatars.all(u.id) as any[]).map((r) => r.avatar_id);
+    if (owned.includes(item.id)) return ack?.({ error: "Already owned" });
+    if (u.coins < item.price) return ack?.({ error: "Not enough coins" });
+    const buy = db.transaction(() => {
+      setCoins.run(u.coins - item.price, u.id);
+      addOwnedAvatar.run(u.id, item.id);
+      setUserAvatar.run(item.src, u.id);
+    });
+    buy();
+    broadcastPresence();
+    ack?.({ coins: u.coins - item.price, avatar: item.src, owned: [...owned, item.id] });
+  });
+
+  socket.on("avatar:set", ({ id }, ack) => {
+    const u = refresh();
+    const item = avatarCatalog().find((a) => a.id === id);
+    if (!u || !item) return ack?.({ error: "Unknown avatar" });
+    const owned = (ownedAvatars.all(u.id) as any[]).map((r) => r.avatar_id);
+    if (!owned.includes(item.id)) return ack?.({ error: "You don't own that one yet" });
+    setUserAvatar.run(item.src, u.id);
+    broadcastPresence();
+    ack?.({ avatar: item.src });
   });
 
   socket.on("user:follow", ({ userId }, ack) => {

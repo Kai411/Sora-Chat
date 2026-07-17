@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { socket } from "../lib/socket";
 import { useCallStore } from "../stores/call";
 import { useRoomStore } from "../stores/room";
+import Avatar from "../components/Avatar.vue";
 import type { DmMessage, PublicUser } from "../types";
 
 const route = useRoute();
@@ -69,10 +70,11 @@ onUnmounted(() => socket.off("dm:new", onNew));
   <div class="flex flex-col">
     <header class="flex items-center gap-3 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
       <button class="text-white/50" @click="router.back()">←</button>
-      <span class="grid size-9 place-items-center rounded-full bg-surface-2 text-xl">{{ peer?.avatar ?? "…" }}</span>
-      <div class="min-w-0 flex-1">
-        <p class="truncate text-sm font-semibold">{{ peer?.nickname ?? "…" }}</p>
-      </div>
+      <button class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="peer && router.push(`/u/${peer.id}`)">
+        <Avatar v-if="peer" :avatar="peer.avatar" :name="peer.nickname" :user-id="peer.id" size-class="size-9 text-xl" />
+        <span v-else class="grid size-9 place-items-center rounded-full bg-surface-2 text-xl">…</span>
+        <span class="truncate text-sm font-semibold">{{ peer?.nickname ?? "…" }}</span>
+      </button>
       <button
         class="grid size-9 place-items-center rounded-full bg-emerald-500/15 text-lg text-emerald-300"
         title="Voice call"

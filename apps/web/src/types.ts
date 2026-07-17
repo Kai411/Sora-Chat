@@ -52,14 +52,34 @@ export interface RoomInfo {
 
 export interface Seat extends PublicUser {
   muted: boolean;
+  blocked: boolean;
 }
+
+export type SeatLayout = "grid" | "couple";
 
 export interface RoomState {
   roomId: string;
   hostId: number;
   admins: number[];
+  layout: SeatLayout;
+  locked: boolean;
   seats: (Seat | null)[];
   requests: { user: PublicUser; seat: number }[];
+}
+
+export interface AvatarItem {
+  id: string;
+  src: string;
+  price: number;
+}
+
+export interface Profile {
+  user: PublicUser;
+  followers: number;
+  following: number;
+  posts: number;
+  isFollowing: boolean;
+  followsYou: boolean;
 }
 
 export interface GachaBanner {
