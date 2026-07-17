@@ -11,6 +11,79 @@ let lkAudioEls: HTMLMediaElement[] = [];
 
 export type RoomAudioStatus = "off" | "connecting" | "on" | "unavailable";
 
+// Playback boost: an <audio> element maxes out at volume 1.0, which is too
+// quiet for comfortable listening, so remote voices are routed through a Web
+// Audio gain stage that can amplify past 1.0, with a compressor acting as a
+// limiter so the extra gain doesn't distort loud peaks.
+const VOICE_GAIN = 2.6;
+let audioCtx: AudioContext | null = null;
+let limiter: DynamicsCompressorNode | null = null;
+const trackGain = new Map<string, () => void>(); // track sid -> cleanup
+
+function ensureAudioGraph() {
+  if (audioCtx) return;
+  const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
+  audioCtx = new Ctx();
+  limiter = audioCtx.createDynamicsCompressor();
+  limiter.threshold.value = -8;
+  limiter.knee.value = 6;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.25;
+  limiter.connect(audioCtx.destination);
+}
+
+function boostTrack(track: any, el: HTMLMediaElement) {
+  try {
+    ensureAudioGraph();
+    const ctx = audioCtx!;
+    // Chrome only feeds a WebRTC track into Web Audio while it's also attached
+    // to a media element, so keep the element as a sink and let the gain graph
+    // do the actual output.
+    const source = ctx.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+    const gain = ctx.createGain();
+    gain.gain.value = VOICE_GAIN;
+    source.connect(gain).connect(limiter!);
+    // Only silence the element (handing output to the boosted graph) once the
+    // context is actually running; if it's suspended, the element stays
+    // audible so voices aren't lost to a blocked AudioContext.
+    const sync = () => (el.muted = ctx.state === "running");
+    ctx.resume().then(sync).catch(() => {});
+    sync();
+    trackGain.set(track.sid ?? "", () => {
+      source.disconnect();
+      gain.disconnect();
+    });
+  } catch {
+    // Web Audio unavailable — leave the element unmuted so voices still play
+    // (quiet, but audible) rather than going silent.
+  }
+}
+
+function teardownAudioGraph() {
+  for (const cleanup of trackGain.values()) cleanup();
+  trackGain.clear();
+  audioCtx?.close().catch(() => {});
+  audioCtx = null;
+  limiter = null;
+}
+
+/**
+ * Bias mobile audio output toward the loudspeaker instead of the earpiece.
+ * iOS routes a mic-active WebRTC session to the receiver ("phone call" mode);
+ * the WebKit AudioSession API lets us ask for "playback" while only listening,
+ * which forces the speaker. A seated speaker still needs "play-and-record"
+ * (earpiece on iOS) — true speaker-while-talking requires the native layer
+ * (Capacitor: AVAudioSession.overrideOutputAudioPort(.speaker)).
+ */
+function routeAudio(seated: boolean) {
+  const session = (navigator as any).audioSession;
+  if (!session) return;
+  try {
+    session.type = seated ? "play-and-record" : "playback";
+  } catch {}
+}
+
 /**
  * The active room lives in a global store so leaving the room *page* doesn't
  * leave the room itself — a dock pill (RoomDock) keeps it reachable anywhere.
@@ -114,8 +187,12 @@ export const useRoomStore = defineStore("room", {
           el.style.display = "none";
           document.body.appendChild(el);
           lkAudioEls.push(el);
+          boostTrack(track, el);
         });
         lk.on(RoomEvent.TrackUnsubscribed, (track) => {
+          const sid = track.sid ?? "";
+          trackGain.get(sid)?.();
+          trackGain.delete(sid);
           for (const el of track.detach()) {
             el.remove();
             lkAudioEls = lkAudioEls.filter((x) => x !== el);
@@ -141,8 +218,11 @@ export const useRoomStore = defineStore("room", {
     /** Publish the mic only while seated & unmuted; otherwise stay listen-only. */
     async syncMic() {
       if (!lkRoom || this.audio !== "on") return;
+      const onSeat = this.seats.some((s) => s?.id === this.myUserId);
       const seat = this.seats.find((s) => s?.id === this.myUserId);
       const enable = !!seat && !seat.muted;
+      // Route to loudspeaker while a pure listener; publishing needs record mode.
+      routeAudio(onSeat);
       try {
         await lkRoom.localParticipant.setMicrophoneEnabled(enable);
       } catch {
@@ -154,6 +234,7 @@ export const useRoomStore = defineStore("room", {
       const lk = lkRoom;
       lkRoom = null;
       lk?.disconnect();
+      teardownAudioGraph();
       for (const el of lkAudioEls) el.remove();
       lkAudioEls = [];
       this.audio = "off";
