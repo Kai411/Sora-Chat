@@ -4,6 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "../stores/app";
 import { useRoomStore } from "../stores/room";
 import InitialAvatar from "../components/InitialAvatar.vue";
+import Icon from "../components/Icon.vue";
 import type { PublicUser } from "../types";
 
 const ROOM_CAPACITY = 20;
@@ -151,7 +152,7 @@ onUnmounted(() => {
 
     <!-- PIN gate -->
     <div v-else-if="needPin" class="flex flex-1 flex-col items-center justify-center gap-4 px-10">
-      <span class="text-5xl">🔒</span>
+      <Icon name="lock" cls="size-12 text-white/40" />
       <p class="text-sm text-white/60">This room is locked</p>
       <input
         v-model="pinDraft"
@@ -177,24 +178,26 @@ onUnmounted(() => {
         <button class="text-white/50" title="Minimize — you stay in the room" @click="minimize">⌄</button>
         <span class="text-xl">{{ room.room?.icon }}</span>
         <div class="min-w-0 flex-1">
-          <p class="truncate text-sm font-semibold">
-            <span v-if="room.room?.locked">🔒</span> {{ room.room?.name ?? "…" }}
+          <p class="flex items-center gap-1 truncate text-sm font-semibold">
+            <Icon v-if="room.room?.locked" name="lock" cls="size-3 shrink-0 text-white/50" />
+            {{ room.room?.name ?? "…" }}
           </p>
           <p class="text-[10px] text-white/40">{{ CATEGORY_LABEL[room.room?.category ?? "chat"] }}</p>
         </div>
         <button
-          class="flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-semibold"
+          class="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-semibold"
           title="People in this room"
           @click="showMembers = true"
         >
-          👥 {{ room.members.length }}/{{ ROOM_CAPACITY }}
+          <Icon name="users" cls="size-3.5 text-white/60" />
+          {{ room.members.length }}/{{ ROOM_CAPACITY }}
         </button>
         <button
-          class="grid size-8 place-items-center rounded-full bg-surface-2 text-sm text-red-300"
+          class="grid size-8 place-items-center rounded-full bg-surface-2 text-red-300"
           title="Leave room"
           @click="confirmLeave = true"
         >
-          ⏻
+          <Icon name="logout" cls="size-4" />
         </button>
       </header>
 
@@ -204,38 +207,44 @@ onUnmounted(() => {
           <button
             v-for="(seat, i) in room.seats"
             :key="i"
-            class="flex flex-col items-center gap-1 rounded-xl border py-2 transition-transform active:scale-95"
-            :class="[
-              seat ? 'border-line bg-surface' : 'border-dashed border-white/15 bg-transparent',
-              pickingSeatFor !== null && !seat && 'border-emerald-400/60',
-              room.myRequestSeat === i && 'border-amber-400/60',
-            ]"
+            class="flex flex-col items-center gap-1 py-1 transition-transform active:scale-95"
             @click="tapSeat(i)"
           >
             <template v-if="seat">
               <span class="relative">
-                <InitialAvatar :name="seat.nickname" :user-id="seat.id" size-class="size-9 text-sm" />
-                <span
-                  class="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-bg text-[8px]"
-                >
-                  {{ seat.muted ? "🔇" : "🎙️" }}
+                <InitialAvatar :name="seat.nickname" :user-id="seat.id" size-class="size-11 text-base" />
+                <span class="absolute -right-0.5 -bottom-0.5 grid size-4.5 place-items-center rounded-full bg-bg">
+                  <Icon :name="seat.muted ? 'mic-off' : 'mic'" cls="size-2.5" :class="seat.muted ? 'text-red-400' : 'text-emerald-400'" />
                 </span>
               </span>
               <span
-                class="h-3 text-[8px] font-semibold"
-                :class="roleOf(seat.id) === 'Host' ? 'text-amber-300' : 'text-sky-300'"
+                class="h-3 text-[9px] font-semibold"
+                :class="roleOf(seat.id) === 'Host' ? 'text-amber-300' : roleOf(seat.id) === 'Admin' ? 'text-sky-300' : 'text-white/40'"
               >
-                {{ roleOf(seat.id) }}
+                {{ roleOf(seat.id) || i + 1 }}
               </span>
             </template>
             <template v-else>
-              <span class="grid size-9 place-items-center rounded-full border border-dashed border-white/15 text-white/25">＋</span>
-              <span class="h-3 text-[8px] text-white/25">{{ room.myRequestSeat === i ? "asked" : "" }}</span>
+              <span
+                class="grid size-11 place-items-center rounded-full border border-dashed text-white/25"
+                :class="
+                  pickingSeatFor !== null
+                    ? 'border-emerald-400/70 text-emerald-300'
+                    : room.myRequestSeat === i
+                      ? 'border-amber-400/70 text-amber-300'
+                      : 'border-white/15'
+                "
+              >
+                <Icon name="plus" cls="size-4" />
+              </span>
+              <span class="h-3 text-[9px]" :class="room.myRequestSeat === i ? 'text-amber-300' : 'text-white/25'">
+                {{ room.myRequestSeat === i ? "asked" : i + 1 }}
+              </span>
             </template>
           </button>
         </div>
         <div class="mt-1.5 flex items-center justify-between">
-          <p class="text-[9px] text-white/25">🎙️ live audio arrives with LiveKit (phase 2)</p>
+          <p class="text-[9px] text-white/25">Live audio arrives with LiveKit (phase 2)</p>
           <button
             v-if="!mySeat && room.myRequestSeat !== null"
             class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-amber-300"
@@ -266,19 +275,24 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <!-- chat: all left-aligned -->
-      <div ref="listEl" class="flex-1 space-y-2 overflow-y-auto px-4 py-3">
+      <!-- chat: bubbles, all left-aligned (own included) -->
+      <div ref="listEl" class="flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
         <p v-if="!room.messages.length" class="py-6 text-center text-xs text-white/30">
-          It's quiet in here… say hi 👋
+          It's quiet in here… say hi
         </p>
-        <div v-for="m in room.messages" :key="m.id" class="flex items-start gap-2">
-          <InitialAvatar :name="m.author" :user-id="m.userId" size-class="size-6 text-[10px]" />
-          <p class="min-w-0 pt-0.5 text-sm leading-snug">
-            <span class="mr-1.5 text-xs font-semibold" :class="m.userId === app.user?.id ? 'text-fuchsia-300' : 'text-sky-300'">
+        <div v-for="m in room.messages" :key="m.id" class="flex items-start gap-2.5">
+          <InitialAvatar :name="m.author" :user-id="m.userId" size-class="size-8 text-xs" />
+          <div class="min-w-0">
+            <p class="text-[10px]" :class="m.userId === app.user?.id ? 'text-fuchsia-300/80' : 'text-white/40'">
               {{ m.author }}
-            </span>
-            <span class="break-words text-white/85">{{ m.text }}</span>
-          </p>
+            </p>
+            <div
+              class="mt-0.5 inline-block max-w-[80%] rounded-2xl rounded-tl-sm px-3.5 py-2 text-sm"
+              :class="m.userId === app.user?.id ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500' : 'bg-surface-2'"
+            >
+              {{ m.text }}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -292,28 +306,28 @@ onUnmounted(() => {
             Say something…
           </button>
           <button
-            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-lg"
+            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-amber-300"
             title="Inventory & gifts"
             @click="showInventory = true"
           >
-            🎁
+            <Icon name="gift" cls="size-4.5" />
           </button>
           <button
             v-if="mySeat"
-            class="grid size-10 shrink-0 place-items-center rounded-full text-lg"
-            :class="mySeat.muted ? 'bg-white text-black' : 'bg-emerald-500/20'"
+            class="grid size-10 shrink-0 place-items-center rounded-full"
+            :class="mySeat.muted ? 'bg-white text-black' : 'bg-emerald-500/20 text-emerald-300'"
             :title="mySeat.muted ? 'Unmute' : 'Mute'"
             @click="room.setMuted(!mySeat.muted)"
           >
-            {{ mySeat.muted ? "🔇" : "🎙️" }}
+            <Icon :name="mySeat.muted ? 'mic-off' : 'mic'" cls="size-4.5" />
           </button>
           <button
             v-if="mySeat"
-            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-lg"
+            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-white/60"
             title="Step down from seat"
             @click="room.leaveSeat()"
           >
-            ↧
+            <Icon name="step-down" cls="size-4.5" />
           </button>
         </template>
         <template v-else>
@@ -361,7 +375,12 @@ onUnmounted(() => {
               >
                 {{ roleOf(m.id) }}
               </span>
-              <span v-if="room.seats.some((s) => s?.id === m.id)" class="text-xs" title="On a seat">🪑</span>
+              <Icon
+                v-if="room.seats.some((s) => s?.id === m.id)"
+                name="seat"
+                cls="size-3.5 text-emerald-300"
+              />
+
             </button>
           </div>
         </div>
@@ -371,7 +390,9 @@ onUnmounted(() => {
       <div v-if="showInventory" class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60" @click.self="showInventory = false">
         <div class="flex max-h-[60%] flex-col rounded-t-3xl border-t border-line bg-bg">
           <div class="flex items-center justify-between px-5 py-3">
-            <p class="text-sm font-semibold">🎁 Your items ({{ app.inventory.length }})</p>
+            <p class="flex items-center gap-1.5 text-sm font-semibold">
+              <Icon name="gift" cls="size-4 text-amber-300" /> Your items ({{ app.inventory.length }})
+            </p>
             <button class="text-white/40" @click="showInventory = false">✕</button>
           </div>
           <p class="px-5 text-[10px] text-white/35">Gifting & in-room minigames arrive in a later update</p>
@@ -411,15 +432,19 @@ onUnmounted(() => {
             <p class="text-sm font-semibold">{{ memberMenu.nickname }}</p>
           </div>
           <div class="mt-4 space-y-2">
-            <button class="w-full rounded-xl bg-surface py-3 text-sm" @click="startInvite(memberMenu!.id)">
-              🪑 Invite to a seat
+            <button
+              class="flex w-full items-center justify-center gap-2 rounded-xl bg-surface py-3 text-sm"
+              @click="startInvite(memberMenu!.id)"
+            >
+              <Icon name="seat" cls="size-4 text-emerald-300" /> Invite to a seat
             </button>
             <button
               v-if="room.isHost"
-              class="w-full rounded-xl bg-surface py-3 text-sm"
+              class="flex w-full items-center justify-center gap-2 rounded-xl bg-surface py-3 text-sm"
               @click="toggleAdmin(memberMenu!)"
             >
-              {{ room.admins.includes(memberMenu!.id) ? "🛡️ Remove admin" : "🛡️ Make admin (max 2)" }}
+              <Icon name="shield" cls="size-4 text-sky-300" />
+              {{ room.admins.includes(memberMenu!.id) ? "Remove admin" : "Make admin (max 2)" }}
             </button>
             <button class="w-full rounded-xl border border-line py-3 text-sm text-white/50" @click="memberMenu = null">
               Cancel
@@ -433,7 +458,7 @@ onUnmounted(() => {
         v-if="room.inviteSeat !== null"
         class="absolute inset-x-3 top-3 z-30 flex items-center gap-3 rounded-2xl border border-emerald-400/30 bg-surface-2/95 p-3.5 shadow-xl backdrop-blur"
       >
-        <span class="text-2xl">🪑</span>
+        <Icon name="seat" cls="size-6 shrink-0 text-emerald-300" />
         <p class="min-w-0 flex-1 text-xs text-white/80">
           The host invites you to <b>seat {{ room.inviteSeat + 1 }}</b>
         </p>

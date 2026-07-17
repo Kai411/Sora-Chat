@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { socket } from "../lib/socket";
+import Icon from "../components/Icon.vue";
 import type { RoomCategory, RoomInfo } from "../types";
 
 const ICONS = ["🎪", "🛋️", "🎵", "🎮", "🌙", "☕", "📚", "🌈"];
@@ -74,8 +75,8 @@ onMounted(load);
         >
           <span class="grid size-12 shrink-0 place-items-center rounded-xl bg-surface-2 text-2xl">{{ r.icon }}</span>
           <div class="min-w-0 flex-1">
-            <p class="truncate font-semibold">
-              <span v-if="r.locked" class="mr-0.5">🔒</span>{{ r.name }}
+            <p class="flex items-center gap-1 truncate font-semibold">
+              <Icon v-if="r.locked" name="lock" cls="size-3 shrink-0 text-white/50" />{{ r.name }}
             </p>
             <p class="truncate text-xs text-white/40">
               <span class="mr-1 rounded bg-surface-2 px-1.5 py-px text-[10px] text-white/60">{{ categoryLabel(r.category) }}</span>
