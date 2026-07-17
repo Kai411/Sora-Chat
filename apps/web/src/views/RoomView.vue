@@ -3,7 +3,10 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAppStore } from "../stores/app";
 import { useRoomStore } from "../stores/room";
+import InitialAvatar from "../components/InitialAvatar.vue";
 import type { PublicUser } from "../types";
+
+const ROOM_CAPACITY = 20;
 
 const route = useRoute();
 const router = useRouter();
@@ -12,11 +15,16 @@ const room = useRoomStore();
 const roomId = String(route.params.id);
 
 const draft = ref("");
+const composing = ref(false);
+const inputEl = ref<HTMLInputElement | null>(null);
 const listEl = ref<HTMLElement | null>(null);
 const gone = ref(false);
 const needPin = ref(false);
 const pinDraft = ref("");
 const pinError = ref("");
+const showMembers = ref(false);
+const showInventory = ref(false);
+const confirmLeave = ref(false);
 const memberMenu = ref<PublicUser | null>(null);
 const pickingSeatFor = ref<number | null>(null); // staff picking a seat to invite this userId to
 const toast = ref("");
@@ -58,11 +66,23 @@ function submitPin() {
   if (/^\d{4}$/.test(pinDraft.value)) tryJoin(pinDraft.value);
 }
 
+function openComposer() {
+  composing.value = true;
+  nextTick(() => inputEl.value?.focus());
+}
+
 function send() {
   const text = draft.value.trim();
   if (!text) return;
   room.send(text);
   draft.value = "";
+}
+
+function onInputBlur() {
+  // Collapse back to the pill when the field is left empty.
+  setTimeout(() => {
+    if (!draft.value.trim()) composing.value = false;
+  }, 150);
 }
 
 function tapSeat(i: number) {
@@ -78,14 +98,15 @@ function tapSeat(i: number) {
   if (!room.isStaff) flash("Request sent to the host");
 }
 
-function badge(userId: number) {
-  if (userId === room.hostId) return "👑";
-  if (room.admins.includes(userId)) return "🛡️";
+function roleOf(userId: number): "Host" | "Admin" | "" {
+  if (userId === room.hostId) return "Host";
+  if (room.admins.includes(userId)) return "Admin";
   return "";
 }
 
 function openMemberMenu(m: PublicUser) {
   if (!room.isStaff || m.id === app.user?.id) return;
+  showMembers.value = false;
   memberMenu.value = m;
 }
 
@@ -152,20 +173,29 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
-      <header class="border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div class="flex items-center gap-3">
-          <button class="text-white/50" title="Minimize — you stay in the room" @click="minimize">⌄</button>
-          <span class="text-2xl">{{ room.room?.icon }}</span>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold">
-              <span v-if="room.room?.locked">🔒</span> {{ room.room?.name ?? "…" }}
-            </p>
-            <p class="text-[10px] text-white/40">
-              {{ CATEGORY_LABEL[room.room?.category ?? "chat"] }} · {{ room.members.length }} here
-            </p>
-          </div>
-          <button class="rounded-full bg-surface-2 px-3 py-1.5 text-xs text-red-300" @click="leave">Leave</button>
+      <header class="flex items-center gap-2.5 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <button class="text-white/50" title="Minimize — you stay in the room" @click="minimize">⌄</button>
+        <span class="text-xl">{{ room.room?.icon }}</span>
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-sm font-semibold">
+            <span v-if="room.room?.locked">🔒</span> {{ room.room?.name ?? "…" }}
+          </p>
+          <p class="text-[10px] text-white/40">{{ CATEGORY_LABEL[room.room?.category ?? "chat"] }}</p>
         </div>
+        <button
+          class="flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-semibold"
+          title="People in this room"
+          @click="showMembers = true"
+        >
+          👥 {{ room.members.length }}/{{ ROOM_CAPACITY }}
+        </button>
+        <button
+          class="grid size-8 place-items-center rounded-full bg-surface-2 text-sm text-red-300"
+          title="Leave room"
+          @click="confirmLeave = true"
+        >
+          ⏻
+        </button>
       </header>
 
       <!-- seats: 2 rows × 5 columns -->
@@ -174,7 +204,7 @@ onUnmounted(() => {
           <button
             v-for="(seat, i) in room.seats"
             :key="i"
-            class="flex flex-col items-center gap-0.5 rounded-xl border py-2 transition-transform active:scale-95"
+            class="flex flex-col items-center gap-1 rounded-xl border py-2 transition-transform active:scale-95"
             :class="[
               seat ? 'border-line bg-surface' : 'border-dashed border-white/15 bg-transparent',
               pickingSeatFor !== null && !seat && 'border-emerald-400/60',
@@ -183,35 +213,31 @@ onUnmounted(() => {
             @click="tapSeat(i)"
           >
             <template v-if="seat">
-              <span class="relative text-xl leading-none">
-                {{ seat.avatar }}
-                <span v-if="badge(seat.id)" class="absolute -top-1.5 -right-2 text-[9px]">{{ badge(seat.id) }}</span>
+              <span class="relative">
+                <InitialAvatar :name="seat.nickname" :user-id="seat.id" size-class="size-9 text-sm" />
+                <span
+                  class="absolute -right-1 -bottom-1 grid size-4 place-items-center rounded-full bg-bg text-[8px]"
+                >
+                  {{ seat.muted ? "🔇" : "🎙️" }}
+                </span>
               </span>
-              <span class="w-full truncate px-0.5 text-center text-[8px] text-white/50">{{ seat.nickname }}</span>
-              <span class="text-[9px]">{{ seat.muted ? "🔇" : "🎙️" }}</span>
+              <span
+                class="h-3 text-[8px] font-semibold"
+                :class="roleOf(seat.id) === 'Host' ? 'text-amber-300' : 'text-sky-300'"
+              >
+                {{ roleOf(seat.id) }}
+              </span>
             </template>
             <template v-else>
-              <span class="text-lg text-white/25">＋</span>
-              <span class="text-[8px] text-white/25">{{ room.myRequestSeat === i ? "asked" : `seat ${i + 1}` }}</span>
+              <span class="grid size-9 place-items-center rounded-full border border-dashed border-white/15 text-white/25">＋</span>
+              <span class="h-3 text-[8px] text-white/25">{{ room.myRequestSeat === i ? "asked" : "" }}</span>
             </template>
           </button>
         </div>
-        <div class="mt-2 flex items-center justify-between">
+        <div class="mt-1.5 flex items-center justify-between">
           <p class="text-[9px] text-white/25">🎙️ live audio arrives with LiveKit (phase 2)</p>
-          <div v-if="mySeat" class="flex gap-2">
-            <button
-              class="rounded-full px-2.5 py-1 text-[10px]"
-              :class="mySeat.muted ? 'bg-white text-black' : 'bg-surface-2'"
-              @click="room.setMuted(!mySeat.muted)"
-            >
-              {{ mySeat.muted ? "🔇 Unmute" : "🎙️ Mute" }}
-            </button>
-            <button class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-red-300" @click="room.leaveSeat()">
-              Step down
-            </button>
-          </div>
           <button
-            v-else-if="room.myRequestSeat !== null"
+            v-if="!mySeat && room.myRequestSeat !== null"
             class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-amber-300"
             @click="room.cancelRequest()"
           >
@@ -226,7 +252,7 @@ onUnmounted(() => {
             :key="r.user.id"
             class="flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-xs"
           >
-            <span>{{ r.user.avatar }}</span>
+            <InitialAvatar :name="r.user.nickname" :user-id="r.user.id" size-class="size-6 text-[10px]" />
             <span class="min-w-0 flex-1 truncate text-white/70">
               {{ r.user.nickname }} wants seat {{ r.seat + 1 }}
             </span>
@@ -238,67 +264,152 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-
-        <!-- members strip -->
-        <div class="scrollbar-none mt-2 flex gap-1.5 overflow-x-auto">
-          <button
-            v-for="m in room.members"
-            :key="m.id"
-            class="shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-xs"
-            @click="openMemberMenu(m)"
-          >
-            {{ m.avatar }} {{ m.nickname }} {{ badge(m.id) }}
-          </button>
-        </div>
       </section>
 
-      <div ref="listEl" class="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <!-- chat: all left-aligned -->
+      <div ref="listEl" class="flex-1 space-y-2 overflow-y-auto px-4 py-3">
         <p v-if="!room.messages.length" class="py-6 text-center text-xs text-white/30">
           It's quiet in here… say hi 👋
         </p>
-        <div
-          v-for="m in room.messages"
-          :key="m.id"
-          class="flex gap-2.5"
-          :class="m.userId === app.user?.id && 'flex-row-reverse'"
-        >
-          <span class="grid size-8 shrink-0 place-items-center rounded-full bg-surface-2 text-base">{{ m.avatar }}</span>
-          <div class="max-w-[75%]" :class="m.userId === app.user?.id && 'text-right'">
-            <p class="text-[10px] text-white/40">{{ m.author }}</p>
-            <div
-              class="mt-0.5 inline-block rounded-2xl px-3.5 py-2 text-left text-sm"
-              :class="m.userId === app.user?.id ? 'rounded-tr-sm bg-gradient-to-r from-violet-500 to-fuchsia-500' : 'rounded-tl-sm bg-surface-2'"
+        <div v-for="m in room.messages" :key="m.id" class="flex items-start gap-2">
+          <InitialAvatar :name="m.author" :user-id="m.userId" size-class="size-6 text-[10px]" />
+          <p class="min-w-0 pt-0.5 text-sm leading-snug">
+            <span class="mr-1.5 text-xs font-semibold" :class="m.userId === app.user?.id ? 'text-fuchsia-300' : 'text-sky-300'">
+              {{ m.author }}
+            </span>
+            <span class="break-words text-white/85">{{ m.text }}</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- bottom action bar -->
+      <footer class="flex items-center gap-2 border-t border-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <template v-if="!composing">
+          <button
+            class="flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-left text-sm text-white/30"
+            @click="openComposer"
+          >
+            Say something…
+          </button>
+          <button
+            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-lg"
+            title="Inventory & gifts"
+            @click="showInventory = true"
+          >
+            🎁
+          </button>
+          <button
+            v-if="mySeat"
+            class="grid size-10 shrink-0 place-items-center rounded-full text-lg"
+            :class="mySeat.muted ? 'bg-white text-black' : 'bg-emerald-500/20'"
+            :title="mySeat.muted ? 'Unmute' : 'Mute'"
+            @click="room.setMuted(!mySeat.muted)"
+          >
+            {{ mySeat.muted ? "🔇" : "🎙️" }}
+          </button>
+          <button
+            v-if="mySeat"
+            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-lg"
+            title="Step down from seat"
+            @click="room.leaveSeat()"
+          >
+            ↧
+          </button>
+        </template>
+        <template v-else>
+          <input
+            ref="inputEl"
+            v-model="draft"
+            placeholder="Say something…"
+            class="min-w-0 flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-sm outline-none placeholder:text-white/25 focus:border-fuchsia-400/50"
+            @keydown.enter="send"
+            @blur="onInputBlur"
+          />
+          <button
+            class="shrink-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-2.5 text-sm font-semibold disabled:opacity-40"
+            :disabled="!draft.trim()"
+            @click="send"
+          >
+            Send
+          </button>
+        </template>
+      </footer>
+
+      <!-- members sheet -->
+      <div v-if="showMembers" class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60" @click.self="showMembers = false">
+        <div class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg">
+          <div class="flex items-center justify-between px-5 py-3">
+            <p class="text-sm font-semibold">In this room ({{ room.members.length }}/{{ ROOM_CAPACITY }})</p>
+            <button class="text-white/40" @click="showMembers = false">✕</button>
+          </div>
+          <div class="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+            <button
+              v-for="m in room.members"
+              :key="m.id"
+              class="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left"
+              :class="room.isStaff && m.id !== app.user?.id && 'active:bg-surface'"
+              @click="openMemberMenu(m)"
             >
-              {{ m.text }}
-            </div>
+              <InitialAvatar :name="m.nickname" :user-id="m.id" size-class="size-10 text-sm" />
+              <span class="min-w-0 flex-1 truncate text-sm">
+                {{ m.nickname }} <span v-if="m.id === app.user?.id" class="text-white/30">(you)</span>
+              </span>
+              <span
+                v-if="roleOf(m.id)"
+                class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                :class="roleOf(m.id) === 'Host' ? 'bg-amber-400/15 text-amber-300' : 'bg-sky-400/15 text-sky-300'"
+              >
+                {{ roleOf(m.id) }}
+              </span>
+              <span v-if="room.seats.some((s) => s?.id === m.id)" class="text-xs" title="On a seat">🪑</span>
+            </button>
           </div>
         </div>
       </div>
 
-      <footer class="flex gap-2 border-t border-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <input
-          v-model="draft"
-          placeholder="Message the room…"
-          class="flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-sm outline-none placeholder:text-white/25 focus:border-fuchsia-400/50"
-          @keydown.enter="send"
-        />
-        <button
-          class="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 text-sm font-semibold disabled:opacity-40"
-          :disabled="!draft.trim()"
-          @click="send"
-        >
-          Send
-        </button>
-      </footer>
+      <!-- inventory / gifts sheet -->
+      <div v-if="showInventory" class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60" @click.self="showInventory = false">
+        <div class="flex max-h-[60%] flex-col rounded-t-3xl border-t border-line bg-bg">
+          <div class="flex items-center justify-between px-5 py-3">
+            <p class="text-sm font-semibold">🎁 Your items ({{ app.inventory.length }})</p>
+            <button class="text-white/40" @click="showInventory = false">✕</button>
+          </div>
+          <p class="px-5 text-[10px] text-white/35">Gifting & in-room minigames arrive in a later update</p>
+          <div class="grid flex-1 grid-cols-4 gap-2 overflow-y-auto p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+            <div v-for="(item, i) in app.inventory" :key="i" class="rounded-xl border border-line bg-surface p-2 text-center">
+              <div class="text-2xl">{{ item.icon }}</div>
+              <p class="mt-1 truncate text-[9px] text-white/50">{{ item.name }}</p>
+            </div>
+            <p v-if="!app.inventory.length" class="col-span-4 py-8 text-center text-xs text-white/30">
+              Nothing yet — try the gacha ✨
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- leave confirm -->
+      <div v-if="confirmLeave" class="absolute inset-0 z-30 grid place-items-center bg-black/60 px-10" @click.self="confirmLeave = false">
+        <div class="w-full rounded-2xl border border-line bg-surface p-5 text-center">
+          <p class="text-sm font-semibold">Leave this room?</p>
+          <p class="mt-1 text-xs text-white/40">You'll give up your seat and roles.</p>
+          <div class="mt-4 flex gap-3">
+            <button class="flex-1 rounded-xl bg-surface-2 py-2.5 text-sm" @click="confirmLeave = false">Stay</button>
+            <button class="flex-1 rounded-xl bg-red-500 py-2.5 text-sm font-semibold" @click="leave">Leave</button>
+          </div>
+        </div>
+      </div>
 
       <!-- staff member menu -->
       <div
         v-if="memberMenu"
-        class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60"
+        class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60"
         @click.self="memberMenu = null"
       >
         <div class="rounded-t-3xl border-t border-line bg-bg p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-          <p class="text-center text-sm font-semibold">{{ memberMenu.avatar }} {{ memberMenu.nickname }}</p>
+          <div class="flex items-center justify-center gap-2">
+            <InitialAvatar :name="memberMenu.nickname" :user-id="memberMenu.id" size-class="size-8 text-xs" />
+            <p class="text-sm font-semibold">{{ memberMenu.nickname }}</p>
+          </div>
           <div class="mt-4 space-y-2">
             <button class="w-full rounded-xl bg-surface py-3 text-sm" @click="startInvite(memberMenu!.id)">
               🪑 Invite to a seat
