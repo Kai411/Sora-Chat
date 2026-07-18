@@ -63,8 +63,10 @@ interface RoomMsg {
   userId: number;
   author: string;
   avatar: string;
+  frame: string | null;
   text: string;
   ts: number;
+  system?: boolean;
 }
 
 const rooms = new Map<string, LiveRoom>();
@@ -205,7 +207,7 @@ const unfollowStmt = db.prepare("DELETE FROM follows WHERE follower = ? AND foll
 const hasFollow = db.prepare("SELECT 1 FROM follows WHERE follower = ? AND followee = ?");
 
 const FEED_SELECT = `
-  SELECT p.id, p.text, p.image, p.ts, p.user_id AS userId, u.nickname AS author, u.avatar,
+  SELECT p.id, p.text, p.image, p.ts, p.user_id AS userId, u.nickname AS author, u.avatar, u.frame AS authorFrame,
     (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id) AS likes,
     (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) AS comments,
     EXISTS(SELECT 1 FROM likes l WHERE l.post_id = p.id AND l.user_id = @viewer) AS liked,
@@ -221,7 +223,7 @@ const getPostRow = db.prepare(`${FEED_SELECT} WHERE p.id = @id`);
 
 const insertComment = db.prepare("INSERT INTO comments (post_id, user_id, text, ts) VALUES (?, ?, ?, ?)");
 const listComments = db.prepare(
-  `SELECT c.id, c.text, c.ts, c.user_id AS userId, u.nickname AS author, u.avatar
+  `SELECT c.id, c.text, c.ts, c.user_id AS userId, u.nickname AS author, u.avatar, u.frame
    FROM comments c JOIN users u ON u.id = c.user_id WHERE c.post_id = ? ORDER BY c.ts LIMIT 200`
 );
 const countComments = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM comments WHERE post_id = ?");
@@ -479,7 +481,7 @@ function rebroadcastUserRooms(userId: number) {
 function systemMessage(r: LiveRoom, text: string) {
   const list = roomMessages.get(r.id);
   if (!list) return;
-  const msg = { id: roomMsgSeq++, userId: 0, author: "", avatar: "", text, ts: Date.now(), system: true };
+  const msg: RoomMsg = { id: roomMsgSeq++, userId: 0, author: "", avatar: "", frame: null, text, ts: Date.now(), system: true };
   list.push(msg);
   if (list.length > 200) list.shift();
   io.to(`room:${r.id}`).emit("room:message", { roomId: r.id, message: msg });
@@ -594,7 +596,7 @@ io.on("connection", (socket: Socket) => {
     other?.join(sessionId);
     const otherUser = getUserById.get(online.get(otherId)!)!;
     socket.emit("match:found", { sessionId, mode, role: "caller", peer: publicUser(otherUser) });
-    io.to(otherId).emit("match:found", { sessionId, mode, role: "callee", peer: publicUser(user) });
+    io.to(otherId).emit("match:found", { sessionId, mode, role: "callee", peer: publicUser(refresh() ?? user) });
   });
 
   socket.on("queue:leave", () => {
@@ -684,14 +686,18 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("room:message", ({ roomId, text }) => {
+    // refresh() so messages carry the *current* avatar/frame, not the ones
+    // from when this socket connected.
+    const u = refresh();
     const t = String(text ?? "").slice(0, 500);
-    if (!user || !t || !roomMessages.has(roomId)) return;
-    if (rooms.get(roomId)?.disabled.has(user.id)) return; // moderator blocked typing
+    if (!u || !t || !roomMessages.has(roomId)) return;
+    if (rooms.get(roomId)?.disabled.has(u.id)) return; // moderator blocked typing
     const msg: RoomMsg = {
       id: roomMsgSeq++,
-      userId: user.id,
-      author: user.nickname,
-      avatar: user.avatar,
+      userId: u.id,
+      author: u.nickname,
+      avatar: u.avatar,
+      frame: u.frame ?? null,
       text: t,
       ts: Date.now(),
     };
@@ -952,14 +958,15 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("dm:send", ({ userId, text }, ack) => {
+    const u = refresh();
     const partner = getUserById.get(Number(userId));
     const t = String(text ?? "").trim().slice(0, 500);
-    if (!user || !partner || !t || partner.id === user.id) return ack?.(null);
+    if (!u || !partner || !t || partner.id === u.id) return ack?.(null);
     const ts = Date.now();
-    const info = insertDm.run(user.id, partner.id, t, ts);
+    const info = insertDm.run(u.id, partner.id, t, ts);
     const message = { id: Number(info.lastInsertRowid), text: t, ts };
     for (const sid of userSockets(partner.id)) {
-      io.to(sid).emit("dm:new", { from: publicUser(user), message });
+      io.to(sid).emit("dm:new", { from: publicUser(u), message });
     }
     ack?.({ ...message, mine: true });
   });
@@ -999,7 +1006,7 @@ io.on("connection", (socket: Socket) => {
     for (const sid of userSockets(user.id)) {
       if (sid !== socket.id) io.to(sid).emit("dm:call:cancelled", { sessionId });
     }
-    io.to(inviterSocket).emit("dm:call:start", { sessionId, role: "caller", peer: publicUser(user) });
+    io.to(inviterSocket).emit("dm:call:start", { sessionId, role: "caller", peer: publicUser(refresh() ?? user) });
     ack?.({ sessionId, role: "callee", peer: publicUser(inviter) });
   });
 
@@ -1054,12 +1061,21 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on("feed:comment", ({ postId, text }, ack) => {
+    const u = refresh();
     const t = String(text ?? "").trim().slice(0, 300);
     const pid = Number(postId);
-    if (!user || !t || !getPostRow.get({ viewer: user.id, id: pid })) return ack?.(null);
+    if (!u || !t || !getPostRow.get({ viewer: u.id, id: pid })) return ack?.(null);
     const ts = Date.now();
-    const info = insertComment.run(pid, user.id, t, ts);
-    const comment = { id: Number(info.lastInsertRowid), text: t, ts, userId: user.id, author: user.nickname, avatar: user.avatar };
+    const info = insertComment.run(pid, u.id, t, ts);
+    const comment = {
+      id: Number(info.lastInsertRowid),
+      text: t,
+      ts,
+      userId: u.id,
+      author: u.nickname,
+      avatar: u.avatar,
+      frame: u.frame ?? null,
+    };
     io.emit("feed:commented", { postId: pid, comments: countComments.get(pid)!.c });
     ack?.(comment);
   });

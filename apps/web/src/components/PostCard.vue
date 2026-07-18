@@ -31,7 +31,7 @@ async function follow() {
   <article class="rounded-2xl border border-line bg-surface p-4">
     <div class="flex items-center gap-2.5">
       <button class="flex min-w-0 flex-1 items-center gap-2.5 text-left" @click="router.push(`/u/${post.userId}`)">
-        <Avatar :avatar="post.avatar" :name="post.author" :user-id="post.userId" size-class="size-9 text-lg" />
+        <Avatar :avatar="post.avatar" :name="post.author" :user-id="post.userId" :frame="post.authorFrame" size-class="size-9 text-lg" />
         <span class="min-w-0">
           <span class="block truncate text-sm font-semibold">{{ post.author }}</span>
           <span class="block text-[10px] text-white/35">{{ ago(post.ts) }}</span>

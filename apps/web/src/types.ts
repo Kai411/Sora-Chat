@@ -37,6 +37,7 @@ export interface Post {
   userId: number;
   author: string;
   avatar: string;
+  authorFrame?: string | null;
   text: string;
   image: string | null;
   ts: number;
@@ -52,6 +53,7 @@ export interface Comment {
   userId: number;
   author: string;
   avatar: string;
+  frame?: string | null;
   text: string;
   ts: number;
 }
@@ -120,6 +122,7 @@ export interface RoomMsg {
   userId: number;
   author: string;
   avatar: string;
+  frame?: string | null;
   text: string;
   ts: number;
   system?: boolean;

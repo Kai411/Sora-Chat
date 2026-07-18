@@ -452,6 +452,7 @@ onUnmounted(() => {
               :avatar="r.user.avatar"
               :name="r.user.nickname"
               :user-id="r.user.id"
+              :frame="r.user.frame"
               size-class="size-6 text-[10px]"
               fallback="initial"
             />
@@ -491,6 +492,7 @@ onUnmounted(() => {
               :avatar="m.avatar"
               :name="m.author"
               :user-id="m.userId"
+              :frame="m.frame"
               size-class="size-8 text-xs"
               fallback="initial"
             />
@@ -641,6 +643,7 @@ onUnmounted(() => {
                 :avatar="m.avatar"
                 :name="m.nickname"
                 :user-id="m.id"
+                :frame="m.frame"
                 size-class="size-10 text-sm"
                 fallback="initial"
               />
@@ -949,6 +952,7 @@ onUnmounted(() => {
               :avatar="card.avatar"
               :name="card.nickname"
               :user-id="card.id"
+              :frame="card.frame"
               size-class="size-14 text-2xl"
               fallback="initial"
             />

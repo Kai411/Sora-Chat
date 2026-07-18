@@ -48,7 +48,7 @@ onMounted(async () => {
           No comments yet — say something nice ✨
         </p>
         <div v-for="c in comments" :key="c.id" class="flex gap-2.5">
-          <Avatar :avatar="c.avatar" :name="c.author" :user-id="c.userId" size-class="size-8 text-base" />
+          <Avatar :avatar="c.avatar" :name="c.author" :user-id="c.userId" :frame="c.frame" size-class="size-8 text-base" />
           <div class="min-w-0">
             <p class="text-[10px] text-white/40">{{ c.author }} · {{ ago(c.ts) }}</p>
             <p class="text-sm text-white/90">{{ c.text }}</p>

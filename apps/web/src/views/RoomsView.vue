@@ -79,7 +79,7 @@ onMounted(load);
           </p>
           <div class="mt-3 flex items-center justify-between">
             <div class="flex min-w-0 items-center gap-2">
-              <Avatar :avatar="r.creator?.avatar ?? '🙂'" :name="r.creator?.nickname" :user-id="r.creator?.id ?? 0" size-class="size-6 text-xs" fallback="initial" />
+              <Avatar :avatar="r.creator?.avatar ?? '🙂'" :name="r.creator?.nickname" :user-id="r.creator?.id ?? 0" :frame="r.creator?.frame" size-class="size-6 text-xs" fallback="initial" />
               <span class="min-w-0 truncate text-xs text-white/60">{{ r.creator?.nickname }}</span>
             </div>
             <span class="flex shrink-0 items-center gap-1.5 text-xs text-white/40">

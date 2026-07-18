@@ -19,7 +19,10 @@ export function pickImage(): Promise<string | null> {
         canvas.height = Math.round(img.height * scale);
         canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
         URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
+        // PNG/WebP sources keep alpha (frames need a transparent center);
+        // photos stay JPEG for size.
+        const keepAlpha = file.type === "image/png" || file.type === "image/webp";
+        resolve(keepAlpha ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", 0.82));
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);

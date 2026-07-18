@@ -53,7 +53,7 @@ onMounted(async () => {
         class="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left active:bg-surface"
         @click="router.push(`/u/${v.user.id}`)"
       >
-        <Avatar :avatar="v.user.avatar" :name="v.user.nickname" :user-id="v.user.id" size-class="size-11 text-lg" />
+        <Avatar :avatar="v.user.avatar" :name="v.user.nickname" :user-id="v.user.id" :frame="v.user.frame" size-class="size-11 text-lg" />
         <span class="min-w-0 flex-1 truncate text-sm">
           {{ v.user.nickname }}
           <span

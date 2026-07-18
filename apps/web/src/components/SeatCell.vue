@@ -16,7 +16,7 @@ const emit = defineEmits<{ tap: [] }>();
 <template>
   <button class="flex flex-col items-center gap-1 py-1 transition-transform active:scale-95" @click="emit('tap')">
     <template v-if="seat">
-      <Avatar :avatar="seat.avatar" :name="seat.nickname" :user-id="seat.id" size-class="size-14 text-lg" fallback="initial" />
+      <Avatar :avatar="seat.avatar" :name="seat.nickname" :user-id="seat.id" :frame="seat.frame" size-class="size-14 text-lg" fallback="initial" />
       <span
         class="flex h-3 items-center gap-1 text-[9px] font-semibold"
         :class="role === 'Host' ? 'text-amber-300' : role === 'Admin' ? 'text-sky-300' : 'text-white/40'"

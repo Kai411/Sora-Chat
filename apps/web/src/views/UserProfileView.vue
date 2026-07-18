@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { assetUrl, socket } from "../lib/socket";
 import { useAppStore } from "../stores/app";
@@ -20,21 +27,31 @@ const commentsFor = ref<Post | null>(null);
 const showVip = ref(false);
 const toast = ref("");
 const followSheet = ref<"followers" | "following" | null>(null);
-const followLists = ref<{ followers: PublicUser[]; following: PublicUser[] }>({ followers: [], following: [] });
-const visits = ref<{ visitors: { user: PublicUser; ts: number }[]; visited: { user: PublicUser; ts: number }[] } | null>(null);
+const followLists = ref<{ followers: PublicUser[]; following: PublicUser[] }>({
+  followers: [],
+  following: [],
+});
+const visits = ref<{
+  visitors: { user: PublicUser; ts: number }[];
+  visited: { user: PublicUser; ts: number }[];
+} | null>(null);
 const missing = ref(false);
 
 // self cosmetics stay reactive to the live session
-const selfFrame = computed(() => (isSelf.value ? app.user?.frame : profile.value?.user.frame));
+const selfFrame = computed(() =>
+  isSelf.value ? app.user?.frame : profile.value?.user.frame,
+);
 // banner (custom upload) takes priority over the preset background cosmetic
 // Banner is the custom uploaded photo only (purchased backgrounds are room-only).
-const bannerUrl = computed(() => (profile.value?.banner ? assetUrl(profile.value.banner) : null));
+const bannerUrl = computed(() =>
+  profile.value?.banner ? assetUrl(profile.value.banner) : null,
+);
 
 // Banner spans from the top down to 1/3 up from the avatar's bottom, measured
 // live so it lands right regardless of safe-area / header height.
 const rootEl = ref<HTMLElement | null>(null);
 const avatarBtn = ref<HTMLElement | null>(null);
-const bannerH = ref(190);
+const bannerH = ref(300);
 function measureBanner() {
   if (!rootEl.value || !avatarBtn.value) return;
   const r = rootEl.value.getBoundingClientRect();
@@ -76,7 +93,9 @@ function ago(ts: number) {
 async function load() {
   missing.value = false;
   profile.value = null;
-  const res = await socket.emitWithAck("user:profile", { userId: userId.value });
+  const res = await socket.emitWithAck("user:profile", {
+    userId: userId.value,
+  });
   if (!res) {
     missing.value = true;
     return;
@@ -95,7 +114,9 @@ async function toggleFollow() {
 }
 
 async function openFollows(tab: "followers" | "following") {
-  const res = await socket.emitWithAck("user:follows", { userId: userId.value });
+  const res = await socket.emitWithAck("user:follows", {
+    userId: userId.value,
+  });
   if (res) followLists.value = res;
   followSheet.value = tab;
 }
@@ -122,11 +143,14 @@ async function activateVip() {
   flash("Welcome to VIP! 👑");
 }
 
-watch(() => route.params.id, async () => {
-  await load();
-  await nextTick();
-  measureBanner();
-});
+watch(
+  () => route.params.id,
+  async () => {
+    await load();
+    await nextTick();
+    measureBanner();
+  },
+);
 onMounted(async () => {
   await load();
   await nextTick();
@@ -145,12 +169,18 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
       :style="{ height: bannerH + 'px' }"
     >
       <img :src="bannerUrl" class="size-full object-cover opacity-70" alt="" />
-      <div class="absolute inset-0 bg-gradient-to-b from-transparent to-bg"></div>
+      <div
+        class="absolute inset-0 bg-gradient-to-b from-transparent to-bg"
+      ></div>
     </div>
 
     <!-- top bar -->
-    <header class="flex items-center px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-      <button v-if="!isSelf" class="text-white/50" @click="router.back()">←</button>
+    <header
+      class="flex items-center px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]"
+    >
+      <button v-if="!isSelf" class="text-white/50" @click="router.back()">
+        ←
+      </button>
       <button
         v-else
         class="grid size-8 place-items-center rounded-full bg-black/40 text-white/70 backdrop-blur-sm"
@@ -168,26 +198,48 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
         >
           ✨ Get VIP
         </button>
-        <button class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60" title="Settings" @click="router.push('/settings')">
+        <button
+          class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
+          title="Settings"
+          @click="router.push('/settings')"
+        >
           <Icon name="gear" cls="size-4" />
         </button>
       </div>
     </header>
 
-    <div v-if="missing" class="flex flex-1 items-center justify-center text-sm text-white/40">User not found</div>
+    <div
+      v-if="missing"
+      class="flex flex-1 items-center justify-center text-sm text-white/40"
+    >
+      User not found
+    </div>
 
     <div v-else-if="profile" class="relative flex-1 overflow-y-auto px-5 pb-8">
       <div class="flex flex-col items-center pt-2 text-center">
-        <button ref="avatarBtn" class="relative" :disabled="!isSelf" @click="isSelf && router.push('/shop?cat=avatar')">
+        <button
+          ref="avatarBtn"
+          class="relative"
+          :disabled="!isSelf"
+          @click="isSelf && router.push('/shop?cat=avatar')"
+        >
           <Avatar
-            :avatar="isSelf ? (app.user?.avatar ?? profile.user.avatar) : profile.user.avatar"
+            :avatar="
+              isSelf
+                ? (app.user?.avatar ?? profile.user.avatar)
+                : profile.user.avatar
+            "
             :name="isSelf ? app.user?.nickname : profile.user.nickname"
             :user-id="profile.user.id"
+            :frame="selfFrame"
             size-class="size-24 text-5xl"
           />
-          <img v-if="selfFrame" :src="assetUrl(selfFrame)" class="pointer-events-none absolute -inset-2 size-[calc(100%+1rem)] max-w-none" alt="" />
         </button>
-        <button v-if="isSelf" class="mt-2 rounded-full bg-surface px-3 py-1 text-[11px] text-fuchsia-300" @click="router.push('/shop?cat=avatar')">
+        <button
+          v-if="isSelf"
+          class="mt-2 rounded-full bg-surface px-3 py-1 text-[11px] text-fuchsia-300"
+          @click="router.push('/shop?cat=avatar')"
+        >
           Change avatar
         </button>
         <h1 class="mt-2 flex items-center gap-2 text-xl font-bold">
@@ -200,7 +252,12 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
             VIP
           </button>
         </h1>
-        <p v-if="profile.followsYou && !isSelf" class="mt-1 text-[11px] text-white/40">Follows you</p>
+        <p
+          v-if="profile.followsYou && !isSelf"
+          class="mt-1 text-[11px] text-white/40"
+        >
+          Follows you
+        </p>
 
         <div class="mt-4 flex gap-8 text-center">
           <button @click="openFollows('followers')">
@@ -224,63 +281,127 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
         <div v-if="!isSelf" class="mt-5 flex w-full gap-2.5">
           <button
             class="flex-1 rounded-xl py-3 text-sm font-semibold transition-transform active:scale-95"
-            :class="profile.isFollowing ? 'bg-surface-2 text-white/60' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'"
+            :class="
+              profile.isFollowing
+                ? 'bg-surface-2 text-white/60'
+                : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
+            "
             @click="toggleFollow"
           >
             {{ profile.isFollowing ? "Following" : "+ Follow" }}
           </button>
-          <button class="flex-1 rounded-xl border border-line py-3 text-sm font-medium text-fuchsia-300" @click="router.push(`/dms/${profile.user.id}`)">
+          <button
+            class="flex-1 rounded-xl border border-line py-3 text-sm font-medium text-fuchsia-300"
+            @click="router.push(`/dms/${profile.user.id}`)"
+          >
             Message
           </button>
         </div>
 
         <div v-else class="mt-5 flex w-full items-center gap-2">
-          <span class="flex items-center gap-1 rounded-xl bg-surface px-3 py-2.5 text-sm font-semibold">🪙 {{ app.coins.toLocaleString() }}</span>
-          <button class="flex-1 rounded-xl bg-surface py-2.5 text-sm font-medium" @click="claimDaily">Daily 🎉</button>
-          <button class="flex-1 rounded-xl bg-surface py-2.5 text-sm font-medium" @click="router.push('/shop')">Shop</button>
+          <span
+            class="flex items-center gap-1 rounded-xl bg-surface px-3 py-2.5 text-sm font-semibold"
+            >🪙 {{ app.coins.toLocaleString() }}</span
+          >
+          <button
+            class="flex-1 rounded-xl bg-surface py-2.5 text-sm font-medium"
+            @click="claimDaily"
+          >
+            Daily 🎉
+          </button>
+          <button
+            class="flex-1 rounded-xl bg-surface py-2.5 text-sm font-medium"
+            @click="router.push('/shop')"
+          >
+            Shop
+          </button>
         </div>
       </div>
 
       <!-- posts -->
       <section class="mt-7">
-        <h2 class="text-sm font-semibold text-white/70">{{ profile.posts }} Posts</h2>
-        <p v-if="!posts.length" class="mt-3 text-xs text-white/30">Nothing posted yet</p>
+        <h2 class="text-sm font-semibold text-white/70">
+          {{ profile.posts }} Posts
+        </h2>
+        <p v-if="!posts.length" class="mt-3 text-xs text-white/30">
+          Nothing posted yet
+        </p>
         <div class="mt-3 space-y-3">
-          <PostCard v-for="p in posts" :key="p.id" :post="p" @comments="commentsFor = $event" />
+          <PostCard
+            v-for="p in posts"
+            :key="p.id"
+            :post="p"
+            @comments="commentsFor = $event"
+          />
         </div>
       </section>
     </div>
 
     <!-- followers / following sheet -->
-    <div v-if="followSheet" class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60" @click.self="followSheet = null">
-      <div class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg">
+    <div
+      v-if="followSheet"
+      class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60"
+      @click.self="followSheet = null"
+    >
+      <div
+        class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg"
+      >
         <div class="flex items-center justify-between px-5 py-3">
           <p class="text-sm font-semibold capitalize">{{ followSheet }}</p>
           <button class="text-white/40" @click="followSheet = null">✕</button>
         </div>
-        <div class="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-          <p v-if="!followLists[followSheet].length" class="py-6 text-center text-xs text-white/30">Nobody here yet</p>
+        <div
+          class="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+        >
+          <p
+            v-if="!followLists[followSheet].length"
+            class="py-6 text-center text-xs text-white/30"
+          >
+            Nobody here yet
+          </p>
           <button
             v-for="u in followLists[followSheet]"
             :key="u.id"
             class="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left active:bg-surface"
             @click="goUser(u)"
           >
-            <Avatar :avatar="u.avatar" :name="u.nickname" :user-id="u.id" size-class="size-10 text-xl" />
-            <span class="min-w-0 flex-1 truncate text-sm">{{ u.nickname }}</span>
+            <Avatar
+              :avatar="u.avatar"
+              :name="u.nickname"
+              :user-id="u.id"
+              :frame="u.frame"
+              size-class="size-10 text-xl"
+            />
+            <span class="min-w-0 flex-1 truncate text-sm">{{
+              u.nickname
+            }}</span>
           </button>
         </div>
       </div>
     </div>
 
-
     <!-- VIP details sheet -->
-    <div v-if="showVip" class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60" @click.self="showVip = false">
-      <div class="rounded-t-3xl border-t border-amber-400/30 bg-gradient-to-b from-amber-500/10 to-bg p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    <div
+      v-if="showVip"
+      class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60"
+      @click.self="showVip = false"
+    >
+      <div
+        class="rounded-t-3xl border-t border-amber-400/30 bg-gradient-to-b from-amber-500/10 to-bg p-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+      >
         <div class="mx-auto mb-4 h-1 w-10 rounded-full bg-white/15"></div>
-        <h2 class="flex items-center gap-2 text-lg font-bold text-amber-300">👑 Sora VIP</h2>
+        <h2 class="flex items-center gap-2 text-lg font-bold text-amber-300">
+          👑 Sora VIP
+        </h2>
         <ul class="mt-3 space-y-2 text-sm text-white/80">
-          <li v-for="perk in VIP_PERKS" :key="perk.text" class="flex items-center gap-2.5"><span>{{ perk.icon }}</span>{{ perk.text }}</li>
+          <li
+            v-for="perk in VIP_PERKS"
+            :key="perk.text"
+            class="flex items-center gap-2.5"
+          >
+            <span>{{ perk.icon }}</span
+            >{{ perk.text }}
+          </li>
         </ul>
         <button
           v-if="isSelf && !profile?.user.vip"
@@ -289,16 +410,33 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
         >
           Unlock VIP · 🪙 800
         </button>
-        <p v-else-if="profile?.user.vip" class="mt-4 text-center text-sm font-semibold text-amber-300">
-          {{ isSelf ? "You're a VIP member ✨" : `${profile?.user.nickname} is a VIP member ✨` }}
+        <p
+          v-else-if="profile?.user.vip"
+          class="mt-4 text-center text-sm font-semibold text-amber-300"
+        >
+          {{
+            isSelf
+              ? "You're a VIP member ✨"
+              : `${profile?.user.nickname} is a VIP member ✨`
+          }}
         </p>
-        <p class="mt-2 text-center text-[10px] text-white/30">Prototype: paid with coins. Real builds use StoreKit / Play Billing / Stripe.</p>
+        <p class="mt-2 text-center text-[10px] text-white/30">
+          Prototype: paid with coins. Real builds use StoreKit / Play Billing /
+          Stripe.
+        </p>
       </div>
     </div>
 
-    <CommentsSheet v-if="commentsFor" :post="commentsFor" @close="commentsFor = null" />
+    <CommentsSheet
+      v-if="commentsFor"
+      :post="commentsFor"
+      @close="commentsFor = null"
+    />
 
-    <div v-if="toast" class="absolute top-16 left-1/2 z-30 -translate-x-1/2 rounded-full bg-surface-2 px-4 py-2 text-xs shadow-lg">
+    <div
+      v-if="toast"
+      class="absolute top-16 left-1/2 z-30 -translate-x-1/2 rounded-full bg-surface-2 px-4 py-2 text-xs shadow-lg"
+    >
       {{ toast }}
     </div>
   </div>

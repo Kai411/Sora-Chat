@@ -47,7 +47,7 @@ onUnmounted(() => socket.off("dm:new", onNew));
         :to="`/dms/${c.user.id}`"
         class="flex items-center gap-3 rounded-2xl p-3 transition-colors active:bg-surface"
       >
-        <Avatar :avatar="c.user.avatar" :name="c.user.nickname" :user-id="c.user.id" size-class="size-12 text-2xl" />
+        <Avatar :avatar="c.user.avatar" :name="c.user.nickname" :user-id="c.user.id" :frame="c.user.frame" size-class="size-12 text-2xl" />
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold">
             {{ c.user.nickname }}

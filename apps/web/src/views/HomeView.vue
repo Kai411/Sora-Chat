@@ -34,7 +34,7 @@ function openFeature(f: Feature) {
   <div class="overflow-y-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-6">
     <header class="flex items-center justify-between">
       <button class="flex items-center gap-3" @click="app.user && router.push(`/u/${app.user.id}`)">
-        <Avatar :avatar="app.user?.avatar ?? '🙂'" :name="app.user?.nickname" :user-id="app.user?.id" size-class="size-11 text-2xl" />
+        <Avatar :avatar="app.user?.avatar ?? '🙂'" :name="app.user?.nickname" :user-id="app.user?.id" :frame="app.user?.frame" size-class="size-11 text-2xl" />
         <div class="text-left">
           <p class="text-xs text-white/40">Welcome back</p>
           <p class="font-semibold leading-tight">
@@ -83,7 +83,7 @@ function openFeature(f: Feature) {
           @click="router.push(`/u/${u.id}`)"
         >
           <div class="relative">
-            <Avatar :avatar="u.avatar" :name="u.nickname" :user-id="u.id" size-class="size-13 text-2xl" />
+            <Avatar :avatar="u.avatar" :name="u.nickname" :user-id="u.id" :frame="u.frame" size-class="size-13 text-2xl" />
             <span class="absolute -right-0.5 -bottom-0.5 size-3 rounded-full border-2 border-bg bg-emerald-400"></span>
           </div>
           <p class="w-full truncate text-center text-[10px] text-white/50">{{ u.nickname }}</p>

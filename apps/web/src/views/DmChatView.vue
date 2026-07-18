@@ -71,7 +71,7 @@ onUnmounted(() => socket.off("dm:new", onNew));
     <header class="flex items-center gap-3 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
       <button class="text-white/50" @click="router.back()">←</button>
       <button class="flex min-w-0 flex-1 items-center gap-3 text-left" @click="peer && router.push(`/u/${peer.id}`)">
-        <Avatar v-if="peer" :avatar="peer.avatar" :name="peer.nickname" :user-id="peer.id" size-class="size-9 text-xl" />
+        <Avatar v-if="peer" :avatar="peer.avatar" :name="peer.nickname" :user-id="peer.id" :frame="peer.frame" size-class="size-9 text-xl" />
         <span v-else class="grid size-9 place-items-center rounded-full bg-surface-2 text-xl">…</span>
         <span class="truncate text-sm font-semibold">{{ peer?.nickname ?? "…" }}</span>
       </button>
