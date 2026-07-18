@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { serverBase, socket } from "../lib/socket";
+import { assetUrl, socket } from "../lib/socket";
 import { useAppStore } from "../stores/app";
 import { pickImage } from "../lib/image";
 import Avatar from "../components/Avatar.vue";
@@ -28,7 +28,7 @@ const missing = ref(false);
 const selfFrame = computed(() => (isSelf.value ? app.user?.frame : profile.value?.user.frame));
 // banner (custom upload) takes priority over the preset background cosmetic
 // Banner is the custom uploaded photo only (purchased backgrounds are room-only).
-const bannerUrl = computed(() => (profile.value?.banner ? serverBase + profile.value.banner : null));
+const bannerUrl = computed(() => (profile.value?.banner ? assetUrl(profile.value.banner) : null));
 
 // Banner spans from the top down to 1/3 up from the avatar's bottom, measured
 // live so it lands right regardless of safe-area / header height.
@@ -137,7 +137,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
 </script>
 
 <template>
-  <div ref="rootEl" class="relative flex h-full flex-col">
+  <div ref="rootEl" class="relative isolate flex h-full flex-col">
     <!-- banner: spans from the very top down to ~2/3 of the avatar -->
     <div
       v-if="bannerUrl"
@@ -185,7 +185,7 @@ onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
             :user-id="profile.user.id"
             size-class="size-24 text-5xl"
           />
-          <img v-if="selfFrame" :src="selfFrame" class="pointer-events-none absolute -inset-2 size-[calc(100%+1rem)] max-w-none" alt="" />
+          <img v-if="selfFrame" :src="assetUrl(selfFrame)" class="pointer-events-none absolute -inset-2 size-[calc(100%+1rem)] max-w-none" alt="" />
         </button>
         <button v-if="isSelf" class="mt-2 rounded-full bg-surface px-3 py-1 text-[11px] text-fuchsia-300" @click="router.push('/shop?cat=avatar')">
           Change avatar

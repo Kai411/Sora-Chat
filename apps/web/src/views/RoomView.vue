@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { assetUrl } from "../lib/socket";
 import { useAppStore } from "../stores/app";
 import { useRoomStore } from "../stores/room";
 import Avatar from "../components/Avatar.vue";
@@ -268,7 +269,7 @@ onUnmounted(() => {
         v-if="room.background"
         class="pointer-events-none absolute inset-0 -z-10"
       >
-        <img :src="room.background" class="size-full object-cover" alt="" />
+        <img :src="assetUrl(room.background)" class="size-full object-cover" alt="" />
         <div class="absolute inset-0 bg-bg/72"></div>
       </div>
 
@@ -830,7 +831,7 @@ onUnmounted(() => {
               "
               @click="room.setBackground(b.src)"
             >
-              <img :src="b.src" class="size-full object-cover" alt="" />
+              <img :src="assetUrl(b.src)" class="size-full object-cover" alt="" />
               <span
                 v-if="room.background === b.src"
                 class="absolute right-1.5 bottom-1.5 rounded-full bg-fuchsia-500 px-2 py-0.5 text-[9px] font-semibold"

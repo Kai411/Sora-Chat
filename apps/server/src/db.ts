@@ -77,6 +77,15 @@ db.exec(`
     src TEXT NOT NULL,
     PRIMARY KEY (user_id, type, src)
   );
+  CREATE TABLE IF NOT EXISTS shop_items (
+    id INTEGER PRIMARY KEY,
+    type TEXT NOT NULL,
+    name TEXT NOT NULL,
+    price INTEGER NOT NULL,
+    src TEXT NOT NULL,
+    created INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_shop_type ON shop_items (type);
 `);
 
 // Migrate older dev databases in place (throwaway data, but don't crash).

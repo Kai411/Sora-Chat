@@ -11,9 +11,17 @@ export type ShopType = "avatar" | "frame" | "background" | "bubble" | "pet";
 
 export interface ShopCategory {
   type: ShopType;
-  items: { src: string; price: number }[];
+  items: { src: string; price: number; name: string }[];
   owned: string[];
   equipped: string | null;
+}
+
+export interface AdminItem {
+  id: number;
+  type: ShopType;
+  name: string;
+  price: number;
+  src: string;
 }
 
 export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic";

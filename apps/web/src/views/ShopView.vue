@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { socket } from "../lib/socket";
+import { assetUrl, socket } from "../lib/socket";
 import { useAppStore } from "../stores/app";
-import Avatar from "../components/Avatar.vue";
 import type { ShopCategory, ShopType } from "../types";
 
 const route = useRoute();
@@ -129,15 +128,16 @@ onMounted(load);
           <div class="relative grid size-16 place-items-center">
             <img
               v-if="active !== 'bubble'"
-              :src="item.src"
+              :src="assetUrl(item.src)"
               class="size-16 rounded-full bg-surface-2 object-cover"
               :class="active === 'background' && '!rounded-xl'"
               alt=""
             />
             <div v-else class="grid size-16 place-items-center">
-              <span class="rounded-2xl rounded-bl-sm bg-surface-2 px-2 py-1 text-[9px] text-white/70" :style="{ backgroundImage: `url(${item.src})`, backgroundSize: 'cover' }">Aa</span>
+              <span class="rounded-2xl rounded-bl-sm bg-surface-2 px-2 py-1 text-[9px] text-white/70" :style="{ backgroundImage: `url(${assetUrl(item.src)})`, backgroundSize: 'cover' }">Aa</span>
             </div>
           </div>
+          <span class="w-full truncate text-center text-[10px] text-white/70">{{ item.name }}</span>
           <span
             class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
             :class="

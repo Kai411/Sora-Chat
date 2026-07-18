@@ -13,6 +13,12 @@ const PORT = Number(process.env.PORT) || 3001;
 const UPLOAD_DIR = process.env.UPLOAD_DIR ?? "uploads";
 mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// TEMPORARY admin credentials — override via env, replace with real auth later.
+const ADMIN_ID = process.env.ADMIN_ID ?? "0001";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "test12345678!";
+const adminTokens = new Set<string>();
+const isAdmin = (token: any) => typeof token === "string" && adminTokens.has(token);
+
 // ---------------------------------------------------------------------------
 // Live (non-persisted) state: presence, party rooms, matchmaking, calls.
 // ---------------------------------------------------------------------------
@@ -257,19 +263,49 @@ function priceFor(type: ShopType, i: number): number {
   return 500 + i * 200; // frame / background / bubble
 }
 
-function catalogFor(type: ShopType): { src: string; price: number }[] {
-  const items: { src: string; price: number }[] = [];
-  try {
-    let i = 0;
-    for (const file of readdirSync(SHOP_DIR[type]).sort()) {
-      const ext = extname(file).toLowerCase();
-      if (!ALLOWED_AVATAR_EXT.has(ext) || basename(file, ext) === "newbie") continue;
-      items.push({ src: `/${SHOP_FOLDER[type]}/${file}`, price: priceFor(type, i++) });
+// Shop items are stored in the DB and managed via the admin panel. On first
+// run the table is seeded from whatever preset images exist in the folders so
+// there's a starting catalog.
+interface ShopItem {
+  id: number;
+  type: ShopType;
+  name: string;
+  price: number;
+  src: string;
+}
+const insertShopItem = db.prepare(
+  "INSERT INTO shop_items (type, name, price, src, created) VALUES (?, ?, ?, ?, ?)"
+);
+const itemsByType = db.prepare<[string], ShopItem>("SELECT id, type, name, price, src FROM shop_items WHERE type = ? ORDER BY id");
+const itemBySrc = db.prepare<[string, string], ShopItem>("SELECT id, type, name, price, src FROM shop_items WHERE type = ? AND src = ?");
+const allShopItems = db.prepare<[], ShopItem>("SELECT id, type, name, price, src FROM shop_items ORDER BY type, id");
+
+function seedShopFromFolders() {
+  if ((db.prepare("SELECT COUNT(*) c FROM shop_items").get() as any).c > 0) return;
+  const seed = db.transaction(() => {
+    for (const type of SHOP_TYPES) {
+      let i = 0;
+      let files: string[] = [];
+      try {
+        files = readdirSync(SHOP_DIR[type]).sort();
+      } catch {
+        continue;
+      }
+      for (const file of files) {
+        const ext = extname(file).toLowerCase();
+        if (!ALLOWED_AVATAR_EXT.has(ext) || basename(file, ext) === "newbie") continue;
+        const label = `${type[0].toUpperCase()}${type.slice(1)} ${i + 1}`;
+        insertShopItem.run(type, label, priceFor(type, i), `/${SHOP_FOLDER[type]}/${file}`, Date.now());
+        i++;
+      }
     }
-  } catch {
-    /* folder not created yet */
-  }
-  return items;
+  });
+  seed();
+}
+seedShopFromFolders();
+
+function catalogFor(type: ShopType): { src: string; price: number; name: string }[] {
+  return (itemsByType.all(type) as ShopItem[]).map((it) => ({ src: it.src, price: it.price, name: it.name }));
 }
 
 const ownedCosmetics = db.prepare<[number, string], { src: string }>(
@@ -1146,6 +1182,52 @@ io.on("connection", (socket: Socket) => {
     EQUIP_STMT[type].run(null, u.id);
     afterEquip(u.id);
     ack?.({ equipped: null });
+  });
+
+  // --- admin panel (manage shop items) — TEMPORARY hardcoded creds ------------
+
+  socket.on("admin:login", ({ id, password }, ack) => {
+    if (String(id ?? "") !== ADMIN_ID || String(password ?? "") !== ADMIN_PASSWORD) {
+      return ack?.({ error: "Wrong admin ID or password" });
+    }
+    const token = randomUUID();
+    adminTokens.add(token);
+    ack?.({ token, types: SHOP_TYPES });
+  });
+
+  socket.on("admin:items", ({ token }, ack) => {
+    if (!isAdmin(token)) return ack?.({ error: "Not authorized" });
+    ack?.({ items: allShopItems.all() });
+  });
+
+  socket.on("admin:itemSave", ({ token, item }, ack) => {
+    if (!isAdmin(token)) return ack?.({ error: "Not authorized" });
+    const type = item?.type;
+    const name = String(item?.name ?? "").trim().slice(0, 40);
+    const price = Math.floor(Number(item?.price));
+    if (!isShopType(type)) return ack?.({ error: "Pick a category" });
+    if (!name) return ack?.({ error: "Name is required" });
+    if (!Number.isFinite(price) || price < 0) return ack?.({ error: "Enter a valid price" });
+    let src: string | null = item?.src ?? null;
+    if (item?.image) {
+      const path = saveDataUrlImage(String(item.image));
+      if (!path) return ack?.({ error: "Image must be PNG/JPEG/WebP under 2 MB" });
+      src = path;
+    }
+    if (item?.id) {
+      if (src) db.prepare("UPDATE shop_items SET type=?, name=?, price=?, src=? WHERE id=?").run(type, name, price, src, Number(item.id));
+      else db.prepare("UPDATE shop_items SET type=?, name=?, price=? WHERE id=?").run(type, name, price, Number(item.id));
+    } else {
+      if (!src) return ack?.({ error: "An image is required" });
+      insertShopItem.run(type, name, price, src, Date.now());
+    }
+    ack?.({ items: allShopItems.all() });
+  });
+
+  socket.on("admin:itemDelete", ({ token, id }, ack) => {
+    if (!isAdmin(token)) return ack?.({ error: "Not authorized" });
+    db.prepare("DELETE FROM shop_items WHERE id = ?").run(Number(id));
+    ack?.({ items: allShopItems.all() });
   });
 
   socket.on("user:follow", ({ userId }, ack) => {

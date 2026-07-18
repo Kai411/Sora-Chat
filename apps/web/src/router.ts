@@ -18,6 +18,7 @@ export const router = createRouter({
     { path: "/shop", component: () => import("./views/ShopView.vue"), meta: { tabs: false } },
     { path: "/settings", component: () => import("./views/SettingsView.vue"), meta: { tabs: false } },
     { path: "/visits", component: () => import("./views/VisitsView.vue"), meta: { tabs: false } },
+    { path: "/admin", component: () => import("./views/AdminView.vue"), meta: { tabs: false, public: true } },
     { path: "/dms", component: () => import("./views/DmListView.vue") },
     { path: "/dms/:id", component: () => import("./views/DmChatView.vue"), meta: { tabs: false } },
     { path: "/random-chat", component: () => import("./views/RandomChatView.vue"), meta: { tabs: false } },
@@ -27,6 +28,7 @@ export const router = createRouter({
 });
 
 router.beforeEach((to) => {
+  if (to.meta.public) return true; // admin panel has its own auth
   if (to.path !== "/login" && !hasStoredSession()) return "/login";
   // Random call is unavailable while in a party room (stay where you are).
   if (to.path === "/random-call" && useRoomStore().room) return false;
