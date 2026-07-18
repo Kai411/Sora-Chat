@@ -13,7 +13,7 @@ db.exec(`
     email TEXT UNIQUE,
     nickname TEXT NOT NULL,
     avatar TEXT NOT NULL DEFAULT '🙂',
-    coins INTEGER NOT NULL DEFAULT 1000,
+    coins INTEGER NOT NULL DEFAULT 3000,
     vip INTEGER NOT NULL DEFAULT 0,
     last_daily INTEGER NOT NULL DEFAULT 0,
     created INTEGER NOT NULL

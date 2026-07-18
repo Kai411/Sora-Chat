@@ -47,7 +47,9 @@ interface LiveRoom {
   requests: Map<number, number>; // userId -> wanted seat index
   invites: Map<number, number>; // userId -> offered seat index
   banned: Set<number>; // kicked users can't re-enter
+  disabled: Set<number>; // muted + typing blocked by a moderator
   layout: SeatLayout;
+  background: string | null; // preset background image path
 }
 
 interface RoomMsg {
@@ -223,7 +225,21 @@ const countComments = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FRO
 // with coins. The extension for each slot is resolved from disk at startup so
 // you can drop in whichever format you have.
 const AVATAR_DIR = fileURLToPath(new URL("../../web/public/avatars", import.meta.url));
+const BG_DIR = fileURLToPath(new URL("../../web/public/backgrounds", import.meta.url));
 const ALLOWED_AVATAR_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+// Preset room backgrounds — image files in apps/web/public/backgrounds/.
+function backgroundCatalog() {
+  const items: { id: string; src: string }[] = [];
+  try {
+    for (const file of readdirSync(BG_DIR).sort()) {
+      if (ALLOWED_AVATAR_EXT.has(extname(file).toLowerCase())) items.push({ id: file, src: `/backgrounds/${file}` });
+    }
+  } catch {
+    /* folder not created yet */
+  }
+  return items;
+}
 
 function avatarExtensions(): Map<string, string> {
   const map = new Map<string, string>();
@@ -370,6 +386,8 @@ function roomState(r: LiveRoom) {
     admins: [...r.admins],
     layout: r.layout,
     locked: !!r.pin,
+    disabled: [...r.disabled],
+    background: r.background,
     seats: r.seats.map((s) => {
       if (!s) return null;
       const u = getUserById.get(s.userId);
@@ -386,6 +404,24 @@ function roomState(r: LiveRoom) {
 
 function broadcastRoom(r: LiveRoom) {
   io.to(`room:${r.id}`).emit("room:state", roomState(r));
+}
+
+// Re-push room state for every room the user occupies (e.g. after an avatar or
+// name change) so seats/members reflect it live.
+function rebroadcastUserRooms(userId: number) {
+  for (const r of rooms.values()) {
+    if (roomMembers(r.id).some((m: any) => m.id === userId)) broadcastRoom(r);
+  }
+}
+
+// System notice in the room chat (moderation actions, etc.).
+function systemMessage(r: LiveRoom, text: string) {
+  const list = roomMessages.get(r.id);
+  if (!list) return;
+  const msg = { id: roomMsgSeq++, userId: 0, author: "", avatar: "", text, ts: Date.now(), system: true };
+  list.push(msg);
+  if (list.length > 200) list.shift();
+  io.to(`room:${r.id}`).emit("room:message", { roomId: r.id, message: msg });
 }
 
 function isStaff(r: LiveRoom, userId: number) {
@@ -548,7 +584,9 @@ io.on("connection", (socket: Socket) => {
       requests: new Map(),
       invites: new Map(),
       banned: new Set(),
+      disabled: new Set(),
       layout: "grid",
+      background: null,
     };
     rooms.set(room.id, room);
     roomMessages.set(room.id, []);
@@ -587,6 +625,7 @@ io.on("connection", (socket: Socket) => {
   socket.on("room:message", ({ roomId, text }) => {
     const t = String(text ?? "").slice(0, 500);
     if (!user || !t || !roomMessages.has(roomId)) return;
+    if (rooms.get(roomId)?.disabled.has(user.id)) return; // moderator blocked typing
     const msg: RoomMsg = {
       id: roomMsgSeq++,
       userId: user.id,
@@ -713,6 +752,24 @@ io.on("connection", (socket: Socket) => {
     const seat = r.seats.find((s) => s?.userId === target);
     if (!seat) return;
     seat.blocked = !!blocked;
+    if (blocked) systemMessage(r, `${user.nickname} muted ${getUserById.get(target)?.nickname ?? "a user"}`);
+    broadcastRoom(r);
+  });
+
+  // Disable = mute mic (if seated) + block typing, for any member.
+  socket.on("seat:disable", ({ roomId, userId, disabled }) => {
+    const r = rooms.get(roomId);
+    const target = Number(userId);
+    if (!user || !r || !canModerate(r, user.id, target)) return;
+    const seat = r.seats.find((s) => s?.userId === target);
+    if (disabled) {
+      r.disabled.add(target);
+      if (seat) seat.blocked = true;
+      systemMessage(r, `${user.nickname} disabled ${getUserById.get(target)?.nickname ?? "a user"}`);
+    } else {
+      r.disabled.delete(target);
+      if (seat) seat.blocked = false;
+    }
     broadcastRoom(r);
   });
 
@@ -731,6 +788,7 @@ io.on("connection", (socket: Socket) => {
     const target = Number(userId);
     if (!user || !r || !canModerate(r, user.id, target)) return;
     r.banned.add(target);
+    systemMessage(r, `${user.nickname} removed ${getUserById.get(target)?.nickname ?? "a user"} from the room`);
     for (const sid of userSockets(target)) {
       const s = io.sockets.sockets.get(sid);
       if (s?.rooms.has(`room:${roomId}`)) {
@@ -759,6 +817,17 @@ io.on("connection", (socket: Socket) => {
     if (!user || !r || r.hostId !== user.id) return;
     if (layout !== "grid" && layout !== "couple") return;
     r.layout = layout;
+    broadcastRoom(r);
+  });
+
+  socket.on("room:backgrounds", (ack) => ack?.(backgroundCatalog()));
+
+  socket.on("room:setBackground", ({ roomId, src }) => {
+    const r = rooms.get(roomId);
+    if (!user || !r || r.hostId !== user.id) return;
+    if (src === null || src === "") r.background = null;
+    else if (backgroundCatalog().some((b) => b.src === src)) r.background = String(src);
+    else return;
     broadcastRoom(r);
   });
 
@@ -957,6 +1026,17 @@ io.on("connection", (socket: Socket) => {
     });
   });
 
+  socket.on("user:rename", ({ name }, ack) => {
+    const u = refresh();
+    if (!u) return ack?.({ error: "Not signed in" });
+    const n = String(name ?? "").trim().slice(0, 20);
+    if (!n) return ack?.({ error: "Name can't be empty" });
+    db.prepare("UPDATE users SET nickname = ? WHERE id = ?").run(n, u.id);
+    broadcastPresence();
+    rebroadcastUserRooms(u.id);
+    ack?.({ nickname: n });
+  });
+
   socket.on("user:visits", (ack) => {
     if (!user) return ack?.(null);
     const hydrate = (rows: any[]) =>
@@ -997,6 +1077,7 @@ io.on("connection", (socket: Socket) => {
     });
     buy();
     broadcastPresence();
+    rebroadcastUserRooms(u.id);
     ack?.({ coins: u.coins - item.price, avatar: item.src, owned: [...owned, item.id] });
   });
 
@@ -1008,6 +1089,7 @@ io.on("connection", (socket: Socket) => {
     if (!owned.includes(item.id)) return ack?.({ error: "You don't own that one yet" });
     setUserAvatar.run(item.src, u.id);
     broadcastPresence();
+    rebroadcastUserRooms(u.id);
     ack?.({ avatar: item.src });
   });
 

@@ -1,8 +1,10 @@
 import { db, getUserById, type UserRow } from "./db";
 
-const bySupabaseId = db.prepare<[string], UserRow>("SELECT * FROM users WHERE supabase_id = ?");
+const bySupabaseId = db.prepare<[string], UserRow>(
+  "SELECT * FROM users WHERE supabase_id = ?",
+);
 const insertUser = db.prepare(
-  "INSERT INTO users (supabase_id, email, nickname, avatar, created) VALUES (?, ?, ?, ?, ?)"
+  "INSERT INTO users (supabase_id, email, nickname, avatar, created) VALUES (?, ?, ?, ?, ?)",
 );
 
 type AuthResult = { user: UserRow } | { error: string };
@@ -14,11 +16,15 @@ type AuthResult = { user: UserRow } | { error: string };
  */
 export async function verifySupabaseToken(
   accessToken: string,
-  extra?: { nickname?: string; avatar?: string }
+  extra?: { nickname?: string; avatar?: string },
 ): Promise<AuthResult> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_ANON_KEY;
-  if (!url || !key) return { error: "Supabase is not configured on the server (SUPABASE_URL / SUPABASE_ANON_KEY)" };
+  if (!url || !key)
+    return {
+      error:
+        "Supabase is not configured on the server (SUPABASE_URL / SUPABASE_ANON_KEY)",
+    };
   if (!accessToken) return { error: "Missing access token" };
 
   let sb: any;
@@ -26,7 +32,8 @@ export async function verifySupabaseToken(
     const res = await fetch(`${url.replace(/\/$/, "")}/auth/v1/user`, {
       headers: { apikey: key, authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return { error: "Invalid or expired session — please sign in again" };
+    if (!res.ok)
+      return { error: "Invalid or expired session — please sign in again" };
     sb = await res.json();
   } catch {
     return { error: "Could not reach the auth service" };
@@ -38,10 +45,23 @@ export async function verifySupabaseToken(
 
   const meta = sb.user_metadata ?? {};
   const email: string | null = sb.email ?? null;
-  const nickname = String(extra?.nickname || meta.nickname || meta.full_name || email?.split("@")[0] || "Soran")
+  const nickname = String(
+    extra?.nickname ||
+      meta.nickname ||
+      meta.full_name ||
+      email?.split("@")[0] ||
+      "Soran",
+  )
     .trim()
     .slice(0, 20);
-  const avatar = String(extra?.avatar || meta.avatar || "🙂").slice(0, 4);
-  const info = insertUser.run(sb.id, email, nickname || "Soran", avatar, Date.now());
+  // New users start with the preset "newbie" avatar (apps/web/public/avatars/newbie.*).
+  const avatar = extra?.avatar || meta.avatar || "/avatars/newbie.png";
+  const info = insertUser.run(
+    sb.id,
+    email,
+    nickname || "Soran",
+    avatar,
+    Date.now(),
+  );
   return { user: getUserById.get(Number(info.lastInsertRowid))! };
 }

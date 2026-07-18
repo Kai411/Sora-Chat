@@ -9,7 +9,6 @@ import SeatCell from "../components/SeatCell.vue";
 import type { PublicUser } from "../types";
 
 const ROOM_CAPACITY = 20;
-const COUPLE_ROWS: number[][][] = [[[0, 1]], [[2, 3], [4, 5]], [[6, 7], [8, 9]]];
 
 const route = useRoute();
 const router = useRouter();
@@ -31,7 +30,16 @@ const showInventory = ref(false);
 const showLock = ref(false);
 const lockPin = ref("");
 const lockError = ref("");
+const showMenu = ref(false);
+const showBackgrounds = ref(false);
+const bgOptions = ref<{ id: string; src: string }[]>([]);
 const confirmLeave = ref(false);
+
+async function openBackgrounds() {
+  showMenu.value = false;
+  bgOptions.value = await room.backgrounds();
+  showBackgrounds.value = true;
+}
 const card = ref<PublicUser | null>(null); // mini profile popup
 const pickingSeatFor = ref<number | null>(null);
 const toast = ref("");
@@ -174,7 +182,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex flex-col">
+  <div class="relative isolate flex flex-col">
     <div v-if="gone || banned || room.kickedFrom" class="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
       <Icon :name="banned || room.kickedFrom ? 'user-x' : 'x'" cls="size-12 text-white/30" />
       <p class="text-sm text-white/60">
@@ -213,6 +221,12 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
+      <!-- room background -->
+      <div v-if="room.background" class="pointer-events-none absolute inset-0 -z-10">
+        <img :src="room.background" class="size-full object-cover" alt="" />
+        <div class="absolute inset-0 bg-bg/72"></div>
+      </div>
+
       <header class="flex items-center gap-2 border-b border-line px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div class="min-w-0 flex-1">
           <p class="flex items-center gap-1 truncate text-sm font-semibold">
@@ -221,21 +235,11 @@ onUnmounted(() => {
           </p>
         </div>
         <button
-          v-if="room.isHost"
           class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
-          :title="room.layout === 'grid' ? 'Switch to couple layout' : 'Switch to grid layout'"
-          @click="room.setLayout(room.layout === 'grid' ? 'couple' : 'grid')"
+          title="Room menu"
+          @click="showMenu = true"
         >
-          <Icon :name="room.layout === 'grid' ? 'heart' : 'grid'" cls="size-4" />
-        </button>
-        <button
-          v-if="room.isHost"
-          class="grid size-8 place-items-center rounded-full bg-surface-2"
-          :class="room.locked ? 'text-amber-300' : 'text-white/60'"
-          title="Lock / unlock room"
-          @click="showLock = true"
-        >
-          <Icon :name="room.locked ? 'lock' : 'unlock'" cls="size-4" />
+          <Icon name="gear" cls="size-4" />
         </button>
         <button
           class="flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-semibold"
@@ -244,20 +248,6 @@ onUnmounted(() => {
         >
           <Icon name="users" cls="size-3.5 text-white/60" />
           {{ room.members.length }}/{{ ROOM_CAPACITY }}
-        </button>
-        <button
-          class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
-          title="Minimize — you stay in the room"
-          @click="minimize"
-        >
-          <Icon name="minimize" cls="size-4" />
-        </button>
-        <button
-          class="grid size-8 place-items-center rounded-full bg-surface-2 text-red-300"
-          title="Leave room"
-          @click="confirmLeave = true"
-        >
-          <Icon name="logout" cls="size-4" />
         </button>
       </header>
 
@@ -275,12 +265,36 @@ onUnmounted(() => {
             @tap="tapSeat(i)"
           />
         </div>
-        <div v-else class="flex flex-col items-center gap-2">
-          <div v-for="(row, ri) in COUPLE_ROWS" :key="ri" class="flex justify-center gap-4">
+        <div v-else class="flex flex-col items-center gap-3">
+          <!-- host couple pod, centered on top -->
+          <div class="flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-500/10 via-fuchsia-500/10 to-amber-500/10 px-5 py-2">
+            <SeatCell
+              :seat="room.seats[0]"
+              :index="0"
+              :role="room.seats[0] ? roleOf(room.seats[0]!.id) : ''"
+              :requested="room.myRequestSeat === 0"
+              :picking="pickingSeatFor !== null && !room.seats[0]"
+              @tap="tapSeat(0)"
+            />
+            <div class="flex flex-col items-center">
+              <Icon name="heart" cls="size-4 text-fuchsia-400" />
+              <span class="text-[8px] font-semibold tracking-wider text-amber-300/70">HOSTS</span>
+            </div>
+            <SeatCell
+              :seat="room.seats[1]"
+              :index="1"
+              :role="room.seats[1] ? roleOf(room.seats[1]!.id) : ''"
+              :requested="room.myRequestSeat === 1"
+              :picking="pickingSeatFor !== null && !room.seats[1]"
+              @tap="tapSeat(1)"
+            />
+          </div>
+          <!-- 2×2 grid of couple pods -->
+          <div class="grid grid-cols-2 gap-2.5">
             <div
-              v-for="pair in row"
+              v-for="pair in [[2, 3], [4, 5], [6, 7], [8, 9]]"
               :key="pair[0]"
-              class="flex items-center gap-1 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-500/5 px-2.5"
+              class="flex items-center gap-2 rounded-2xl border border-fuchsia-400/15 bg-white/[0.03] px-3 py-1.5"
             >
               <SeatCell
                 :seat="room.seats[pair[0]]"
@@ -290,7 +304,7 @@ onUnmounted(() => {
                 :picking="pickingSeatFor !== null && !room.seats[pair[0]]"
                 @tap="tapSeat(pair[0])"
               />
-              <Icon name="heart" cls="size-3.5 text-fuchsia-400/70" />
+              <Icon name="heart" cls="size-3 shrink-0 text-fuchsia-400/60" />
               <SeatCell
                 :seat="room.seats[pair[1]]"
                 :index="pair[1]"
@@ -358,25 +372,33 @@ onUnmounted(() => {
       <!-- chat -->
       <div ref="listEl" class="flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
         <p v-if="!room.messages.length" class="py-6 text-center text-xs text-white/30">It's quiet in here… say hi</p>
-        <div v-for="m in room.messages" :key="m.id" class="flex items-start gap-2.5">
-          <Avatar :avatar="m.avatar" :name="m.author" :user-id="m.userId" size-class="size-8 text-xs" fallback="initial" />
-          <div class="min-w-0 flex-1">
-            <p class="text-[10px]" :class="m.userId === app.user?.id ? 'text-fuchsia-300/80' : 'text-white/40'">
-              {{ m.author }}
-            </p>
-            <div
-              class="mt-1 inline-block max-w-[85%] rounded-xl rounded-tl-[4px] px-3 py-1.5 text-sm leading-snug break-words"
-              :class="m.userId === app.user?.id ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500' : 'bg-surface-2'"
-            >
-              {{ m.text }}
+        <template v-for="m in room.messages" :key="m.id">
+          <p v-if="m.system" class="text-center text-[10px] text-white/35">{{ m.text }}</p>
+          <div v-else class="flex items-start gap-2.5">
+            <Avatar :avatar="m.avatar" :name="m.author" :user-id="m.userId" size-class="size-8 text-xs" fallback="initial" />
+            <div class="min-w-0 flex-1">
+              <p class="text-[10px]" :class="m.userId === app.user?.id ? 'text-fuchsia-300/80' : 'text-white/40'">
+                {{ m.author }}
+              </p>
+              <div
+                class="mt-1 inline-block max-w-[85%] rounded-xl rounded-tl-[4px] px-3 py-1.5 text-sm leading-snug break-words"
+                :class="m.userId === app.user?.id ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500' : 'bg-surface-2'"
+              >
+                {{ m.text }}
+              </div>
             </div>
           </div>
-        </div>
+        </template>
       </div>
 
       <!-- bottom action bar -->
       <footer class="flex items-center gap-2 border-t border-line p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <template v-if="!composing">
+        <template v-if="room.iAmDisabled">
+          <div class="flex-1 rounded-full bg-red-500/10 px-4 py-2.5 text-center text-sm text-red-300">
+            A moderator disabled you — you can't talk or type
+          </div>
+        </template>
+        <template v-else-if="!composing">
           <button class="flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-left text-sm text-white/30" @click="openComposer">
             Say something…
           </button>
@@ -467,6 +489,75 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- room menu sheet -->
+      <div v-if="showMenu" class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60" @click.self="showMenu = false">
+        <div class="rounded-t-3xl border-t border-line bg-bg p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+          <div class="mx-auto mb-4 h-1 w-10 rounded-full bg-white/15"></div>
+          <div class="space-y-2">
+            <button
+              v-if="room.isHost"
+              class="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-sm"
+              @click="room.setLayout(room.layout === 'grid' ? 'couple' : 'grid'); showMenu = false"
+            >
+              <Icon :name="room.layout === 'grid' ? 'heart' : 'grid'" cls="size-4 text-fuchsia-300" />
+              {{ room.layout === "grid" ? "Switch to couple layout" : "Switch to grid layout" }}
+            </button>
+            <button
+              v-if="room.isHost"
+              class="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-sm"
+              @click="showMenu = false; showLock = true"
+            >
+              <Icon :name="room.locked ? 'lock' : 'unlock'" cls="size-4 text-amber-300" />
+              {{ room.locked ? "Room is locked — manage PIN" : "Lock room with a PIN" }}
+            </button>
+            <button v-if="room.isHost" class="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-sm" @click="openBackgrounds">
+              <Icon name="image" cls="size-4 text-sky-300" /> Change background
+            </button>
+            <button class="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-sm" @click="showMenu = false; minimize()">
+              <Icon name="minimize" cls="size-4 text-white/60" /> Minimize (stay in room)
+            </button>
+            <button
+              class="flex w-full items-center gap-3 rounded-xl bg-red-500/15 px-4 py-3 text-sm font-semibold text-red-300"
+              @click="showMenu = false; confirmLeave = true"
+            >
+              <Icon name="logout" cls="size-4" /> Leave room
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- background picker sheet (host) -->
+      <div v-if="showBackgrounds" class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60" @click.self="showBackgrounds = false">
+        <div class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg">
+          <div class="flex items-center justify-between px-5 py-3">
+            <p class="text-sm font-semibold">Room background</p>
+            <button class="text-white/40" @click="showBackgrounds = false">✕</button>
+          </div>
+          <div class="grid flex-1 grid-cols-2 gap-2.5 overflow-y-auto p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+            <button
+              class="grid h-24 place-items-center rounded-xl border text-xs text-white/50"
+              :class="!room.background ? 'border-fuchsia-400 bg-fuchsia-500/10 text-fuchsia-300' : 'border-line bg-surface'"
+              @click="room.setBackground(null)"
+            >
+              None
+            </button>
+            <button
+              v-for="b in bgOptions"
+              :key="b.id"
+              class="relative h-24 overflow-hidden rounded-xl border"
+              :class="room.background === b.src ? 'border-fuchsia-400' : 'border-line'"
+              @click="room.setBackground(b.src)"
+            >
+              <img :src="b.src" class="size-full object-cover" alt="" />
+              <span v-if="room.background === b.src" class="absolute right-1.5 bottom-1.5 rounded-full bg-fuchsia-500 px-2 py-0.5 text-[9px] font-semibold">Active</span>
+            </button>
+            <p v-if="!bgOptions.length" class="col-span-2 py-6 text-center text-xs text-white/30">
+              No backgrounds uploaded yet.
+            </p>
+          </div>
+        </div>
+      </div>
+
       <!-- host lock sheet -->
       <div v-if="showLock" class="absolute inset-0 z-30 grid place-items-center bg-black/60 px-8" @click.self="showLock = false">
         <div class="w-full rounded-2xl border border-line bg-surface p-5">
@@ -523,22 +614,13 @@ onUnmounted(() => {
                 <span v-if="card.vip" class="rounded bg-gradient-to-r from-amber-400 to-yellow-300 px-1.5 py-px text-[10px] font-bold text-black">VIP</span>
               </p>
               <p class="text-[11px] text-white/40">
-                {{ cardRole || "Listener" }}{{ cardSeat ? ` · seat ${room.seats.indexOf(cardSeat) + 1}` : "" }}
+                {{ cardRole || "Listener" }}<span v-if="room.isDisabled(card.id)" class="text-red-300"> · disabled</span>
               </p>
             </div>
           </div>
 
           <div class="mt-4 space-y-2">
-            <div class="flex gap-2">
-              <button class="flex-1 rounded-xl bg-surface py-2.5 text-sm" @click="viewProfile(card!)">View profile</button>
-              <button
-                v-if="card.id !== app.user?.id"
-                class="flex-1 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 py-2.5 text-sm font-semibold"
-                @click="router.push(`/dms/${card!.id}`)"
-              >
-                Say hi
-              </button>
-            </div>
+            <button class="w-full rounded-xl bg-surface py-2.5 text-sm" @click="viewProfile(card!)">View profile</button>
 
             <template v-if="room.canModerate(card.id)">
               <div class="flex gap-2">
@@ -559,13 +641,20 @@ onUnmounted(() => {
                 </template>
               </div>
               <div class="flex gap-2">
+                <button
+                  class="flex-1 rounded-xl py-2.5 text-xs"
+                  :class="room.isDisabled(card.id) ? 'bg-emerald-500/15 text-emerald-300' : 'bg-surface text-red-300'"
+                  @click="room.disableUser(card!.id, !room.isDisabled(card!.id)); card = null"
+                >
+                  {{ room.isDisabled(card.id) ? "Enable user" : "Disable user" }}
+                </button>
                 <button v-if="room.isHost" class="flex-1 rounded-xl bg-surface py-2.5 text-xs" @click="toggleAdmin(card!)">
                   {{ room.admins.includes(card.id) ? "Remove admin" : "Make admin" }}
                 </button>
-                <button class="flex-1 rounded-xl bg-red-500/15 py-2.5 text-xs font-semibold text-red-300" @click="doKick(card!)">
-                  Kick from room
-                </button>
               </div>
+              <button class="w-full rounded-xl bg-red-500/15 py-2.5 text-xs font-semibold text-red-300" @click="doKick(card!)">
+                Kick from room
+              </button>
             </template>
           </div>
         </div>

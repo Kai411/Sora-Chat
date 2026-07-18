@@ -1,6 +1,10 @@
-# Preset profile pictures
+# Preset avatars
 
 Drop the shop avatars here as **square** images named `a01` … `a12`.
+
+**Also add `newbie.<ext>`** (e.g. `newbie.png`) — the default avatar every new
+account starts with. Any of png/jpg/jpeg/webp works.
+
 
 - Formats accepted: **`.png`, `.jpg`, `.jpeg`, `.webp`** (mix freely — the server
   detects each file's extension at startup).

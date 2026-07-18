@@ -49,16 +49,16 @@ export const useAppStore = defineStore("app", {
       this.inventory = res.inventory;
     },
     /** Returns "confirm" when Supabase requires email confirmation first. */
-    async signUp(input: { email: string; password: string; nickname: string; avatar: string }) {
+    async signUp(input: { email: string; password: string; nickname: string }) {
       if (!supabase) throw new Error("Supabase isn't configured");
       const { data, error } = await supabase.auth.signUp({
         email: input.email,
         password: input.password,
-        options: { data: { nickname: input.nickname, avatar: input.avatar } },
+        options: { data: { nickname: input.nickname } },
       });
       if (error) throw new Error(error.message);
       if (!data.session) return "confirm" as const;
-      await this.socketAuth({ nickname: input.nickname, avatar: input.avatar });
+      await this.socketAuth({ nickname: input.nickname });
       return "ok" as const;
     },
     async signIn(input: { email: string; password: string }) {
@@ -80,6 +80,12 @@ export const useAppStore = defineStore("app", {
       if (!supabase) throw new Error("Supabase isn't configured");
       const { error } = await supabase.auth.resetPasswordForEmail(email);
       if (error) throw new Error(error.message);
+    },
+    async rename(name: string): Promise<string | null> {
+      const res = await socket.emitWithAck("user:rename", { name });
+      if (res?.error) return res.error;
+      if (this.user) this.user.nickname = res.nickname;
+      return null;
     },
     async logout() {
       await supabase?.auth.signOut().catch(() => {});

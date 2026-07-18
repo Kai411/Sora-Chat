@@ -4,8 +4,6 @@ import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
 import { useAppStore } from "../stores/app";
 
-const AVATARS = ["🦊", "🐰", "🐼", "🐸", "🦄", "🐙", "🐧", "🦋", "🌸", "🍀", "🎧", "🌙"];
-
 const app = useAppStore();
 const router = useRouter();
 
@@ -14,7 +12,6 @@ const mode = ref<"signin" | "signup">("signin");
 const email = ref("");
 const password = ref("");
 const nickname = ref("");
-const avatar = ref(AVATARS[0]);
 const busy = ref(false);
 const error = ref("");
 const notice = ref("");
@@ -30,7 +27,6 @@ async function submit() {
         email: email.value,
         password: password.value,
         nickname: nickname.value.trim(),
-        avatar: avatar.value,
       });
       if (result === "confirm") {
         notice.value = "Almost there — check your inbox and confirm your email, then come back and sign in.";
@@ -105,28 +101,13 @@ async function forgot() {
         </button>
       </div>
 
-      <template v-if="mode === 'signup'">
-        <div>
-          <label class="mb-2 block text-xs font-medium text-white/50">PICK AN AVATAR</label>
-          <div class="grid grid-cols-6 gap-2">
-            <button
-              v-for="a in AVATARS"
-              :key="a"
-              class="rounded-xl bg-surface py-2 text-2xl transition-transform active:scale-90"
-              :class="avatar === a && 'ring-2 ring-fuchsia-400 bg-surface-2'"
-              @click="avatar = a"
-            >
-              {{ a }}
-            </button>
-          </div>
-        </div>
-        <input
-          v-model="nickname"
-          maxlength="20"
-          placeholder="Nickname"
-          class="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none placeholder:text-white/25 focus:border-fuchsia-400/50"
-        />
-      </template>
+      <input
+        v-if="mode === 'signup'"
+        v-model="nickname"
+        maxlength="20"
+        placeholder="Nickname"
+        class="w-full rounded-xl border border-line bg-surface px-4 py-3 text-sm outline-none placeholder:text-white/25 focus:border-fuchsia-400/50"
+      />
 
       <input
         v-model="email"

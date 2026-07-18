@@ -104,6 +104,8 @@ export const useRoomStore = defineStore("room", {
     audio: "off" as RoomAudioStatus,
     layout: "grid" as SeatLayout,
     locked: false,
+    disabled: [] as number[],
+    background: null as string | null,
     kickedFrom: null as string | null, // room name we were just kicked from
   }),
   getters: {
@@ -121,6 +123,12 @@ export const useRoomStore = defineStore("room", {
     },
     myRequestSeat(state): number | null {
       return state.requests.find((r) => r.user.id === this.myUserId)?.seat ?? null;
+    },
+    iAmDisabled(state): boolean {
+      return state.disabled.includes(this.myUserId);
+    },
+    isDisabled(): (userId: number) => boolean {
+      return (userId: number) => this.disabled.includes(userId);
     },
   },
   actions: {
@@ -172,6 +180,8 @@ export const useRoomStore = defineStore("room", {
       this.requests = state.requests;
       this.layout = state.layout ?? "grid";
       this.locked = !!state.locked;
+      this.disabled = state.disabled ?? [];
+      this.background = state.background ?? null;
     },
     leave() {
       if (this.room) socket.emit("room:leave", { roomId: this.room.id });
@@ -296,6 +306,9 @@ export const useRoomStore = defineStore("room", {
     kick(userId: number) {
       if (this.room) socket.emit("room:kick", { roomId: this.room.id, userId });
     },
+    disableUser(userId: number, disabled: boolean) {
+      if (this.room) socket.emit("seat:disable", { roomId: this.room.id, userId, disabled });
+    },
     async setPin(pin: string | null): Promise<string | null> {
       if (!this.room) return null;
       const res = await socket.emitWithAck("room:setPin", { roomId: this.room.id, pin });
@@ -303,6 +316,12 @@ export const useRoomStore = defineStore("room", {
     },
     setLayout(layout: SeatLayout) {
       if (this.room) socket.emit("room:layout", { roomId: this.room.id, layout });
+    },
+    setBackground(src: string | null) {
+      if (this.room) socket.emit("room:setBackground", { roomId: this.room.id, src });
+    },
+    backgrounds(): Promise<{ id: string; src: string }[]> {
+      return socket.emitWithAck("room:backgrounds");
     },
     /** Host > admin > member; you can't moderate yourself or your rank. */
     canModerate(targetId: number): boolean {

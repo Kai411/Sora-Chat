@@ -63,6 +63,8 @@ export interface RoomState {
   admins: number[];
   layout: SeatLayout;
   locked: boolean;
+  disabled: number[];
+  background: string | null;
   seats: (Seat | null)[];
   requests: { user: PublicUser; seat: number }[];
 }
@@ -99,6 +101,7 @@ export interface RoomMsg {
   avatar: string;
   text: string;
   ts: number;
+  system?: boolean;
 }
 
 export interface MatchFound {
