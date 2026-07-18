@@ -143,19 +143,9 @@ async function activateVip() {
 
 watch(
   () => route.params.id,
-  async () => {
-    await load();
-    await nextTick();
-    measureBanner();
-  },
+  () => load(),
 );
-onMounted(async () => {
-  await load();
-  await nextTick();
-  measureBanner();
-  window.addEventListener("resize", measureBanner);
-});
-onBeforeUnmount(() => window.removeEventListener("resize", measureBanner));
+onMounted(load);
 </script>
 
 <template>

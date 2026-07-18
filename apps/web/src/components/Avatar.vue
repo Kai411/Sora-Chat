@@ -29,6 +29,11 @@ watch(
 );
 
 const isImage = () => !broken.value && props.avatar?.startsWith("/");
+// Safe zone: when a frame is worn, the frame fills the component's box and
+// the picture shrinks to 70% inside it — so the frame never overflows and can
+// never be clipped by scrollers/cards. Frame art should have its transparent
+// aperture at ~70% of the canvas (see public/frames/README.md).
+const framed = () => !!props.frame && !frameBroken.value;
 </script>
 
 <template>
@@ -37,27 +42,24 @@ const isImage = () => !broken.value && props.avatar?.startsWith("/");
       v-if="isImage()"
       :src="assetUrl(avatar)"
       class="shrink-0 rounded-full object-cover"
-      :class="sizeClass ?? 'size-9'"
+      :class="[sizeClass ?? 'size-9', framed() && 'scale-[.7]']"
       alt=""
       @error="broken = true"
     />
-    <InitialAvatar
-      v-else-if="fallback === 'initial'"
-      :name="name ?? '?'"
-      :user-id="userId ?? 0"
-      :size-class="sizeClass"
-    />
+    <span v-else-if="fallback === 'initial'" class="inline-grid" :class="framed() && 'scale-[.7]'">
+      <InitialAvatar :name="name ?? '?'" :user-id="userId ?? 0" :size-class="sizeClass" />
+    </span>
     <span
       v-else
       class="grid shrink-0 place-items-center rounded-full bg-surface-2"
-      :class="sizeClass ?? 'size-9 text-lg'"
+      :class="[sizeClass ?? 'size-9 text-lg', framed() && 'scale-[.7]']"
     >
       {{ avatar || "🙂" }}
     </span>
     <img
-      v-if="frame && !frameBroken"
-      :src="assetUrl(frame)"
-      class="pointer-events-none absolute -inset-[20%] size-[140%] max-w-none"
+      v-if="framed()"
+      :src="assetUrl(frame!)"
+      class="pointer-events-none absolute inset-0 size-full max-w-none"
       alt=""
       @error="frameBroken = true"
     />
