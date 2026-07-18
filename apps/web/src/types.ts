@@ -80,6 +80,7 @@ export type SeatLayout = "grid" | "couple";
 
 export interface RoomState {
   roomId: string;
+  name?: string;
   hostId: number;
   admins: number[];
   layout: SeatLayout;

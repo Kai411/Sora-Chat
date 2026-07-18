@@ -32,6 +32,9 @@ const showLock = ref(false);
 const lockPin = ref("");
 const lockError = ref("");
 const showMenu = ref(false);
+const showRename = ref(false);
+const renameDraft = ref("");
+const renameError = ref("");
 const showBackgrounds = ref(false);
 const bgOptions = ref<{ src: string }[]>([]);
 const confirmLeave = ref(false);
@@ -185,6 +188,21 @@ async function applyLock(lock: boolean) {
   flash(lock ? "Room locked 🔒" : "Room unlocked");
 }
 
+function openRename() {
+  showMenu.value = false;
+  renameDraft.value = room.room?.name ?? "";
+  renameError.value = "";
+  showRename.value = true;
+}
+
+async function applyRename() {
+  renameError.value = "";
+  const err = await room.rename(renameDraft.value);
+  if (err) return (renameError.value = err);
+  showRename.value = false;
+  flash("Room renamed");
+}
+
 function minimize() {
   router.back();
 }
@@ -269,7 +287,11 @@ onUnmounted(() => {
         v-if="room.background"
         class="pointer-events-none absolute inset-0 -z-10"
       >
-        <img :src="assetUrl(room.background)" class="size-full object-cover" alt="" />
+        <img
+          :src="assetUrl(room.background)"
+          class="size-full object-cover"
+          alt=""
+        />
         <div class="absolute inset-0 bg-bg/72"></div>
       </div>
 
@@ -323,8 +345,11 @@ onUnmounted(() => {
       </header>
 
       <!-- seats -->
-      <section class="px-4 py-3">
-        <div v-if="room.layout === 'grid'" class="grid grid-cols-5 gap-1">
+      <section class="px-2 py-3">
+        <div
+          v-if="room.layout === 'grid'"
+          class="grid grid-cols-5 gap-x-1 gap-y-2"
+        >
           <SeatCell
             v-for="(seat, i) in room.seats"
             :key="i"
@@ -769,6 +794,13 @@ onUnmounted(() => {
             <button
               v-if="room.isHost"
               class="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-sm"
+              @click="openRename"
+            >
+              <Icon name="settings" cls="size-4 text-emerald-300" /> Rename room
+            </button>
+            <button
+              v-if="room.isHost"
+              class="flex w-full items-center gap-3 rounded-xl bg-surface px-4 py-3 text-sm"
               @click="openBackgrounds"
             >
               <Icon name="image" cls="size-4 text-sky-300" /> Change background
@@ -834,7 +866,11 @@ onUnmounted(() => {
               "
               @click="room.setBackground(b.src)"
             >
-              <img :src="assetUrl(b.src)" class="size-full object-cover" alt="" />
+              <img
+                :src="assetUrl(b.src)"
+                class="size-full object-cover"
+                alt=""
+              />
               <span
                 v-if="room.background === b.src"
                 class="absolute right-1.5 bottom-1.5 rounded-full bg-fuchsia-500 px-2 py-0.5 text-[9px] font-semibold"
@@ -848,6 +884,44 @@ onUnmounted(() => {
             >
               You don't own any backgrounds — buy some in the shop →
             </RouterLink>
+          </div>
+        </div>
+      </div>
+
+      <!-- rename sheet (host) -->
+      <div
+        v-if="showRename"
+        class="absolute inset-0 z-30 grid place-items-center bg-black/60 px-8"
+        @click.self="showRename = false"
+      >
+        <div class="w-full rounded-2xl border border-line bg-surface p-5">
+          <p class="flex items-center gap-2 text-sm font-semibold">
+            <Icon name="settings" cls="size-4 text-emerald-300" /> Rename room
+          </p>
+          <input
+            v-model="renameDraft"
+            maxlength="30"
+            placeholder="Room name"
+            class="mt-3 w-full rounded-xl border border-line bg-surface-2 px-4 py-3 text-sm outline-none focus:border-emerald-400/50"
+            @keydown.enter="applyRename"
+          />
+          <p v-if="renameError" class="mt-2 text-xs text-red-300">
+            {{ renameError }}
+          </p>
+          <div class="mt-4 flex gap-2.5">
+            <button
+              class="flex-1 rounded-xl bg-surface-2 py-2.5 text-sm"
+              @click="showRename = false"
+            >
+              Cancel
+            </button>
+            <button
+              class="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-lime-400 py-2.5 text-sm font-bold text-black disabled:opacity-40"
+              :disabled="!renameDraft.trim()"
+              @click="applyRename"
+            >
+              Save
+            </button>
           </div>
         </div>
       </div>

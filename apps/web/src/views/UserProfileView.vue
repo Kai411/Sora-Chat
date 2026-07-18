@@ -204,10 +204,11 @@ onMounted(load);
     </div>
 
     <div v-else-if="profile" class="relative flex-1 overflow-y-auto px-5 pb-8">
-      <div class="flex flex-col items-center pt-2 text-center">
+      <div class="flex flex-col items-center pt-5 text-center">
         <button
           ref="avatarBtn"
           class="relative"
+          style="scale: 0.7"
           :disabled="!isSelf"
           @click="isSelf && router.push('/shop?cat=avatar')"
         >
@@ -220,17 +221,18 @@ onMounted(load);
             :name="isSelf ? app.user?.nickname : profile.user.nickname"
             :user-id="profile.user.id"
             :frame="selfFrame"
-            size-class="size-24 text-5xl"
+            :frame-fit="2"
+            size-class="size-32 text-6xl"
           />
         </button>
-        <button
+        <!-- <button
           v-if="isSelf"
           class="mt-2 rounded-full bg-surface px-3 py-1 text-[11px] text-fuchsia-300"
           @click="router.push('/shop?cat=avatar')"
         >
           Change avatar
-        </button>
-        <h1 class="mt-2 flex items-center gap-2 text-xl font-bold">
+        </button> -->
+        <h1 class="mt-4 flex items-center gap-2 text-xl font-bold">
           {{ profile.user.nickname }}
           <button
             v-if="profile.user.vip"

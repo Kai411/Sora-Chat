@@ -445,6 +445,7 @@ function roomSummary(r: LiveRoom) {
 function roomState(r: LiveRoom) {
   return {
     roomId: r.id,
+    name: r.name,
     hostId: r.hostId,
     admins: [...r.admins],
     layout: r.layout,
@@ -864,6 +865,16 @@ io.on("connection", (socket: Socket) => {
       }
     }
     reconcileRoom(roomId);
+  });
+
+  socket.on("room:rename", ({ roomId, name }, ack) => {
+    const r = rooms.get(roomId);
+    if (!user || !r || r.hostId !== user.id) return ack?.({ error: "Only the host can rename the room" });
+    const n = String(name ?? "").trim().slice(0, 30);
+    if (!n) return ack?.({ error: "Give the room a name" });
+    r.name = n;
+    broadcastRoom(r);
+    ack?.({ name: n });
   });
 
   socket.on("room:setPin", ({ roomId, pin }, ack) => {

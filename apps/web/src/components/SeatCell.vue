@@ -14,18 +14,41 @@ const emit = defineEmits<{ tap: [] }>();
 </script>
 
 <template>
-  <button class="flex flex-col items-center gap-1 py-1 transition-transform active:scale-95" @click="emit('tap')">
+  <button
+    class="flex flex-col items-center gap-4 py-1 transition-transform active:scale-95"
+    @click="emit('tap')"
+  >
     <template v-if="seat">
-      <Avatar :avatar="seat.avatar" :name="seat.nickname" :user-id="seat.id" :frame="seat.frame" size-class="size-14 text-lg" fallback="initial" />
+      <Avatar
+        :avatar="seat.avatar"
+        :name="seat.nickname"
+        :user-id="seat.id"
+        :frame="seat.frame"
+        :frame-fit="2"
+        size-class="size-14 text-lg"
+        fallback="initial"
+      />
       <span
         class="flex h-3 items-center gap-1 text-[9px] font-semibold"
-        :class="role === 'Host' ? 'text-amber-300' : role === 'Admin' ? 'text-sky-300' : 'text-white/40'"
+        :class="
+          role === 'Host'
+            ? 'text-amber-300'
+            : role === 'Admin'
+              ? 'text-sky-300'
+              : 'text-white/40'
+        "
       >
         {{ role || index + 1 }}
         <Icon
           :name="seat.blocked || seat.muted ? 'mic-off' : 'mic'"
           cls="size-2.5"
-          :class="seat.blocked ? 'text-red-500' : seat.muted ? 'text-white/40' : 'text-emerald-400'"
+          :class="
+            seat.blocked
+              ? 'text-red-500'
+              : seat.muted
+                ? 'text-white/40'
+                : 'text-emerald-400'
+          "
         />
       </span>
     </template>
@@ -42,7 +65,10 @@ const emit = defineEmits<{ tap: [] }>();
       >
         <Icon name="plus" cls="size-4" />
       </span>
-      <span class="h-3 text-[9px]" :class="requested ? 'text-amber-300' : 'text-white/25'">
+      <span
+        class="h-3 text-[9px]"
+        :class="requested ? 'text-amber-300' : 'text-white/25'"
+      >
         {{ requested ? "asked" : index + 1 }}
       </span>
     </template>

@@ -182,6 +182,17 @@ export const useRoomStore = defineStore("room", {
       this.locked = !!state.locked;
       this.disabled = state.disabled ?? [];
       this.background = state.background ?? null;
+      if (this.room) {
+        if (state.name) this.room.name = state.name;
+        this.room.locked = !!state.locked;
+      }
+    },
+    async rename(name: string): Promise<string | null> {
+      if (!this.room) return null;
+      const res = await socket.emitWithAck("room:rename", { roomId: this.room.id, name });
+      if (res?.error) return res.error;
+      this.room.name = res.name;
+      return null;
     },
     leave() {
       if (this.room) socket.emit("room:leave", { roomId: this.room.id });

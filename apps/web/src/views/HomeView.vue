@@ -74,7 +74,7 @@ function openFeature(f: Feature) {
           {{ app.others.length }}
         </span>
       </div>
-      <div class="scrollbar-none -mx-5 mt-3 flex gap-4 overflow-x-auto px-5">
+      <div class="scrollbar-none -mx-5 mt-1 flex gap-4 overflow-x-auto px-5 py-4">
         <button
           v-for="u in app.others"
           :key="u.id"
