@@ -71,6 +71,12 @@ db.exec(`
     avatar_id TEXT NOT NULL,
     PRIMARY KEY (user_id, avatar_id)
   );
+  CREATE TABLE IF NOT EXISTS cosmetics_owned (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    type TEXT NOT NULL,
+    src TEXT NOT NULL,
+    PRIMARY KEY (user_id, type, src)
+  );
 `);
 
 // Migrate older dev databases in place (throwaway data, but don't crash).
@@ -80,6 +86,11 @@ try {
 try {
   db.exec("ALTER TABLE posts ADD COLUMN image TEXT");
 } catch {}
+for (const col of ["frame", "bubble", "pet", "profile_bg", "banner"]) {
+  try {
+    db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT`);
+  } catch {}
+}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users (supabase_id)");
 
 export interface UserRow {
@@ -91,10 +102,15 @@ export interface UserRow {
   coins: number;
   vip: number;
   last_daily: number;
+  frame: string | null;
+  bubble: string | null;
+  pet: string | null;
+  profile_bg: string | null;
+  banner: string | null;
 }
 
 export function publicUser(u: UserRow) {
-  return { id: u.id, nickname: u.nickname, avatar: u.avatar, vip: !!u.vip };
+  return { id: u.id, nickname: u.nickname, avatar: u.avatar, vip: !!u.vip, frame: u.frame ?? null, pet: u.pet ?? null };
 }
 
 export const getUserById = db.prepare<[number], UserRow>("SELECT * FROM users WHERE id = ?");

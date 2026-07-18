@@ -224,16 +224,47 @@ const countComments = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FRO
 // <id>.<ext> (a01 … a12), any of png/jpg/jpeg/webp. No custom uploads; bought
 // with coins. The extension for each slot is resolved from disk at startup so
 // you can drop in whichever format you have.
-const AVATAR_DIR = fileURLToPath(new URL("../../web/public/avatars", import.meta.url));
-const BG_DIR = fileURLToPath(new URL("../../web/public/backgrounds", import.meta.url));
 const ALLOWED_AVATAR_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
-// Preset room backgrounds — image files in apps/web/public/backgrounds/.
-function backgroundCatalog() {
-  const items: { id: string; src: string }[] = [];
+// Cosmetics shop — five categories, each backed by an image folder under
+// apps/web/public/<folder>. Files are scanned per request so drop-ins appear
+// without a restart. No custom uploads; bought with coins.
+type ShopType = "avatar" | "frame" | "background" | "bubble" | "pet";
+const SHOP_TYPES: ShopType[] = ["avatar", "frame", "background", "bubble", "pet"];
+const SHOP_FOLDER: Record<ShopType, string> = {
+  avatar: "avatars",
+  frame: "frames",
+  background: "backgrounds",
+  bubble: "bubbles",
+  pet: "pets",
+};
+const SHOP_DIR = Object.fromEntries(
+  SHOP_TYPES.map((t) => [t, fileURLToPath(new URL(`../../web/public/${SHOP_FOLDER[t]}`, import.meta.url))])
+) as Record<ShopType, string>;
+// which users column stores each equipped item
+const EQUIP_COL: Record<ShopType, "avatar" | "frame" | "profile_bg" | "bubble" | "pet"> = {
+  avatar: "avatar",
+  frame: "frame",
+  background: "profile_bg",
+  bubble: "bubble",
+  pet: "pet",
+};
+const isShopType = (t: any): t is ShopType => SHOP_TYPES.includes(t);
+
+function priceFor(type: ShopType, i: number): number {
+  if (type === "avatar") return i < 4 ? 300 : i < 8 ? 600 : 1000;
+  if (type === "pet") return 1500 + i * 300;
+  return 500 + i * 200; // frame / background / bubble
+}
+
+function catalogFor(type: ShopType): { src: string; price: number }[] {
+  const items: { src: string; price: number }[] = [];
   try {
-    for (const file of readdirSync(BG_DIR).sort()) {
-      if (ALLOWED_AVATAR_EXT.has(extname(file).toLowerCase())) items.push({ id: file, src: `/backgrounds/${file}` });
+    let i = 0;
+    for (const file of readdirSync(SHOP_DIR[type]).sort()) {
+      const ext = extname(file).toLowerCase();
+      if (!ALLOWED_AVATAR_EXT.has(ext) || basename(file, ext) === "newbie") continue;
+      items.push({ src: `/${SHOP_FOLDER[type]}/${file}`, price: priceFor(type, i++) });
     }
   } catch {
     /* folder not created yet */
@@ -241,31 +272,25 @@ function backgroundCatalog() {
   return items;
 }
 
-function avatarExtensions(): Map<string, string> {
-  const map = new Map<string, string>();
-  try {
-    for (const file of readdirSync(AVATAR_DIR)) {
-      const ext = extname(file).toLowerCase();
-      if (ALLOWED_AVATAR_EXT.has(ext)) map.set(basename(file, extname(file)), file);
-    }
-  } catch {
-    /* folder not created yet — fall back to .png below */
-  }
-  return map;
+const ownedCosmetics = db.prepare<[number, string], { src: string }>(
+  "SELECT src FROM cosmetics_owned WHERE user_id = ? AND type = ?"
+);
+const addCosmetic = db.prepare<[number, string, string]>(
+  "INSERT OR IGNORE INTO cosmetics_owned (user_id, type, src) VALUES (?, ?, ?)"
+);
+const EQUIP_STMT: Record<ShopType, { run: (v: string | null, id: number) => unknown }> = Object.fromEntries(
+  SHOP_TYPES.map((t) => [t, db.prepare(`UPDATE users SET ${EQUIP_COL[t]} = ? WHERE id = ?`)])
+) as any;
+
+function equippedOf(u: UserRow, type: ShopType): string | null {
+  return (u as any)[EQUIP_COL[type]] ?? null;
+}
+// avatar/frame/pet show up on other people's screens, so re-push presence + rooms.
+function afterEquip(userId: number) {
+  broadcastPresence();
+  rebroadcastUserRooms(userId);
 }
 
-// Rebuilt per request so freshly-dropped image files appear without a restart.
-function avatarCatalog() {
-  const found = avatarExtensions();
-  return Array.from({ length: 12 }, (_, i) => {
-    const id = `a${String(i + 1).padStart(2, "0")}`;
-    return { id, src: `/avatars/${found.get(id) ?? `${id}.png`}`, price: i < 4 ? 300 : i < 8 ? 600 : 1000 };
-  });
-}
-
-const ownedAvatars = db.prepare("SELECT avatar_id FROM avatar_owned WHERE user_id = ?");
-const addOwnedAvatar = db.prepare("INSERT OR IGNORE INTO avatar_owned (user_id, avatar_id) VALUES (?, ?)");
-const setUserAvatar = db.prepare("UPDATE users SET avatar = ? WHERE id = ?");
 const recordVisit = db.prepare("INSERT OR REPLACE INTO visits (visitor, visited, ts) VALUES (?, ?, ?)");
 const listVisitors = db.prepare("SELECT visitor AS uid, ts FROM visits WHERE visited = ? ORDER BY ts DESC LIMIT 50");
 const listVisited = db.prepare("SELECT visited AS uid, ts FROM visits WHERE visitor = ? ORDER BY ts DESC LIMIT 50");
@@ -820,13 +845,17 @@ io.on("connection", (socket: Socket) => {
     broadcastRoom(r);
   });
 
-  socket.on("room:backgrounds", (ack) => ack?.(backgroundCatalog()));
+  // Purchased backgrounds are used here — the host picks from ones they own.
+  socket.on("room:backgrounds", (ack) => {
+    if (!user) return ack?.([]);
+    ack?.((ownedCosmetics.all(user.id, "background") as any[]).map((r) => ({ src: r.src })));
+  });
 
   socket.on("room:setBackground", ({ roomId, src }) => {
     const r = rooms.get(roomId);
     if (!user || !r || r.hostId !== user.id) return;
     if (src === null || src === "") r.background = null;
-    else if (backgroundCatalog().some((b) => b.src === src)) r.background = String(src);
+    else if ((ownedCosmetics.all(user.id, "background") as any[]).some((x) => x.src === src)) r.background = String(src);
     else return;
     broadcastRoom(r);
   });
@@ -1007,6 +1036,8 @@ io.on("connection", (socket: Socket) => {
     if (target.id !== user.id) recordVisit.run(user.id, target.id, Date.now());
     ack?.({
       user: publicUser(target),
+      background: target.profile_bg ?? null,
+      banner: target.banner ?? null,
       followers: followerCount.get(target.id)!.c,
       following: followingCount.get(target.id)!.c,
       posts: postCount.get(target.id)!.c,
@@ -1024,6 +1055,20 @@ io.on("connection", (socket: Socket) => {
       followers: hydrate(listFollowers.all(target.id) as any[]),
       following: hydrate(listFollowing.all(target.id) as any[]),
     });
+  });
+
+  // Custom banner photo (uploaded, unlike preset cosmetics) — stored in /uploads.
+  socket.on("user:setBanner", ({ image }, ack) => {
+    const u = refresh();
+    if (!u) return ack?.({ error: "Not signed in" });
+    if (image === null || image === "") {
+      db.prepare("UPDATE users SET banner = NULL WHERE id = ?").run(u.id);
+      return ack?.({ banner: null });
+    }
+    const path = saveDataUrlImage(String(image));
+    if (!path) return ack?.({ error: "Image must be PNG/JPEG/WebP under 2 MB" });
+    db.prepare("UPDATE users SET banner = ? WHERE id = ?").run(path, u.id);
+    ack?.({ banner: path });
   });
 
   socket.on("user:rename", ({ name }, ack) => {
@@ -1052,45 +1097,55 @@ io.on("connection", (socket: Socket) => {
     });
   });
 
-  // --- avatar shop (preset profile pictures, bought with coins) --------------
+  // --- cosmetics shop (avatar / frame / background / bubble / pet) ------------
 
-  socket.on("avatar:catalog", (ack) => {
-    if (!user) return ack?.(null);
+  socket.on("shop:catalog", (ack) => {
+    const u = refresh();
+    if (!u) return ack?.(null);
     ack?.({
-      items: avatarCatalog(),
-      owned: (ownedAvatars.all(user.id) as any[]).map((r) => r.avatar_id),
-      current: user.avatar,
+      coins: u.coins,
+      categories: SHOP_TYPES.map((type) => ({
+        type,
+        items: catalogFor(type),
+        owned: (ownedCosmetics.all(u.id, type) as any[]).map((r) => r.src),
+        equipped: equippedOf(u, type),
+      })),
     });
   });
 
-  socket.on("avatar:buy", ({ id }, ack) => {
+  socket.on("shop:buy", ({ type, src }, ack) => {
     const u = refresh();
-    const item = avatarCatalog().find((a) => a.id === id);
-    if (!u || !item) return ack?.({ error: "Unknown avatar" });
-    const owned = (ownedAvatars.all(u.id) as any[]).map((r) => r.avatar_id);
-    if (owned.includes(item.id)) return ack?.({ error: "Already owned" });
+    if (!u || !isShopType(type)) return ack?.({ error: "Unknown item" });
+    const item = catalogFor(type).find((i) => i.src === src);
+    if (!item) return ack?.({ error: "Unknown item" });
+    const owned = (ownedCosmetics.all(u.id, type) as any[]).map((r) => r.src);
+    if (owned.includes(src)) return ack?.({ error: "Already owned" });
     if (u.coins < item.price) return ack?.({ error: "Not enough coins" });
-    const buy = db.transaction(() => {
+    db.transaction(() => {
       setCoins.run(u.coins - item.price, u.id);
-      addOwnedAvatar.run(u.id, item.id);
-      setUserAvatar.run(item.src, u.id);
-    });
-    buy();
-    broadcastPresence();
-    rebroadcastUserRooms(u.id);
-    ack?.({ coins: u.coins - item.price, avatar: item.src, owned: [...owned, item.id] });
+      addCosmetic.run(u.id, type, src);
+      EQUIP_STMT[type].run(src, u.id);
+    })();
+    afterEquip(u.id);
+    ack?.({ coins: u.coins - item.price, owned: [...owned, src], equipped: src });
   });
 
-  socket.on("avatar:set", ({ id }, ack) => {
+  socket.on("shop:equip", ({ type, src }, ack) => {
     const u = refresh();
-    const item = avatarCatalog().find((a) => a.id === id);
-    if (!u || !item) return ack?.({ error: "Unknown avatar" });
-    const owned = (ownedAvatars.all(u.id) as any[]).map((r) => r.avatar_id);
-    if (!owned.includes(item.id)) return ack?.({ error: "You don't own that one yet" });
-    setUserAvatar.run(item.src, u.id);
-    broadcastPresence();
-    rebroadcastUserRooms(u.id);
-    ack?.({ avatar: item.src });
+    if (!u || !isShopType(type)) return ack?.({ error: "Unknown item" });
+    const owned = (ownedCosmetics.all(u.id, type) as any[]).map((r) => r.src);
+    if (!owned.includes(src)) return ack?.({ error: "You don't own that yet" });
+    EQUIP_STMT[type].run(src, u.id);
+    afterEquip(u.id);
+    ack?.({ equipped: src });
+  });
+
+  socket.on("shop:unequip", ({ type }, ack) => {
+    const u = refresh();
+    if (!u || !isShopType(type) || type === "avatar") return ack?.({ error: "Can't remove that" });
+    EQUIP_STMT[type].run(null, u.id);
+    afterEquip(u.id);
+    ack?.({ equipped: null });
   });
 
   socket.on("user:follow", ({ userId }, ack) => {

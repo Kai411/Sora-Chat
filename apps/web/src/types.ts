@@ -3,6 +3,17 @@ export interface PublicUser {
   nickname: string;
   avatar: string;
   vip: boolean;
+  frame?: string | null;
+  pet?: string | null;
+}
+
+export type ShopType = "avatar" | "frame" | "background" | "bubble" | "pet";
+
+export interface ShopCategory {
+  type: ShopType;
+  items: { src: string; price: number }[];
+  owned: string[];
+  equipped: string | null;
 }
 
 export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic";
@@ -77,6 +88,8 @@ export interface AvatarItem {
 
 export interface Profile {
   user: PublicUser;
+  background: string | null;
+  banner: string | null;
   followers: number;
   following: number;
   posts: number;
