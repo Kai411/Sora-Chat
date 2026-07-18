@@ -67,3 +67,23 @@ body {
 .anim-ring {
   animation: ring-pulse 1.6s ease-out infinite;
 }
+
+/* speaking indicator: shrink-and-return only, never grows past normal size */
+@keyframes speak-shrink {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.95);
+  }
+}
+.anim-speak {
+  animation: speak-shrink 0.8s ease-in-out infinite;
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-speak {
+    animation: none;
+  }
+}

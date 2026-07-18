@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import Avatar from "./Avatar.vue";
 import Icon from "./Icon.vue";
+import { useRoomStore } from "../stores/room";
 import type { Seat } from "../types";
 
-defineProps<{
+const props = defineProps<{
   seat: Seat | null;
   index: number;
   role: "" | "Host" | "Admin";
@@ -11,6 +12,9 @@ defineProps<{
   picking: boolean; // staff is choosing a seat to invite someone to
 }>();
 const emit = defineEmits<{ tap: [] }>();
+
+const room = useRoomStore();
+const speaking = () => !!props.seat && room.speaking.includes(props.seat.id);
 </script>
 
 <template>
@@ -25,6 +29,7 @@ const emit = defineEmits<{ tap: [] }>();
         :user-id="seat.id"
         :frame="seat.frame"
         :frame-fit="2"
+        :class="speaking() && 'anim-speak'"
         size-class="size-14 text-lg"
         fallback="initial"
       />

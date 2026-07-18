@@ -107,6 +107,7 @@ export const useRoomStore = defineStore("room", {
     disabled: [] as number[],
     background: null as string | null,
     kickedFrom: null as string | null, // room name we were just kicked from
+    speaking: [] as number[], // user ids currently talking (from LiveKit)
   }),
   getters: {
     myUserId(): number {
@@ -230,6 +231,9 @@ export const useRoomStore = defineStore("room", {
             lkAudioEls = lkAudioEls.filter((x) => x !== el);
           }
         });
+        lk.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          this.speaking = speakers.map((p) => Number(p.identity)).filter(Number.isFinite);
+        });
         lk.on(RoomEvent.Disconnected, () => {
           if (lkRoom === lk) this.disconnectAudio();
         });
@@ -270,6 +274,7 @@ export const useRoomStore = defineStore("room", {
       for (const el of lkAudioEls) el.remove();
       lkAudioEls = [];
       this.audio = "off";
+      this.speaking = [];
     },
     send(text: string) {
       if (this.room) socket.emit("room:message", { roomId: this.room.id, text });
