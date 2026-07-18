@@ -47,17 +47,15 @@ const bannerUrl = computed(() =>
   profile.value?.banner ? assetUrl(profile.value.banner) : null,
 );
 
-// Banner spans from the top down to 1/3 up from the avatar's bottom, measured
-// live so it lands right regardless of safe-area / header height.
-const rootEl = ref<HTMLElement | null>(null);
-const avatarBtn = ref<HTMLElement | null>(null);
+// const rootEl = ref<HTMLElement | null>(null);
+// const avatarBtn = ref<HTMLElement | null>(null);
 const bannerH = ref(300);
-function measureBanner() {
-  if (!rootEl.value || !avatarBtn.value) return;
-  const r = rootEl.value.getBoundingClientRect();
-  const a = avatarBtn.value.getBoundingClientRect();
-  bannerH.value = Math.round(a.top - r.top + a.height * (2 / 3));
-}
+// function measureBanner() {
+//   if (!rootEl.value || !avatarBtn.value) return;
+//   const r = rootEl.value.getBoundingClientRect();
+//   const a = avatarBtn.value.getBoundingClientRect();
+//   bannerH.value = Math.round(a.top - r.top + a.height * (2 / 3));
+// }
 
 async function changeBanner() {
   const dataUrl = await pickImage();
