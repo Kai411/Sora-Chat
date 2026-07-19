@@ -40,26 +40,18 @@ const frameStyle = () => ({ transform: `scale(${props.frameFit ?? 1.6})` });
 <template>
   <span class="relative inline-grid shrink-0 place-items-center">
     <img
-      v-if="isImage()"
       :src="assetUrl(avatar)"
       class="shrink-0 rounded-full object-cover"
       :class="sizeClass ?? 'size-9'"
       alt=""
       @error="broken = true"
     />
-    <InitialAvatar
-      v-else-if="fallback === 'initial'"
+    <!-- <InitialAvatar
+      v-else="fallback === 'initial'"
       :name="name ?? '?'"
       :user-id="userId ?? 0"
       :size-class="sizeClass"
-    />
-    <span
-      v-else
-      class="grid shrink-0 place-items-center rounded-full bg-surface-2"
-      :class="sizeClass ?? 'size-9 text-lg'"
-    >
-      {{ avatar || "🙂" }}
-    </span>
+    /> -->
     <img
       v-if="framed()"
       :src="assetUrl(frame!)"
