@@ -47,6 +47,42 @@ async function openBackgrounds() {
 const card = ref<PublicUser | null>(null); // mini profile popup
 const pickingSeatFor = ref<number | null>(null);
 const toast = ref("");
+
+// --- swipable pages (1: seats+chat, 2: utilities) ---
+const pagerEl = ref<HTMLElement | null>(null);
+const page = ref(0);
+function onPagerScroll() {
+  const el = pagerEl.value;
+  if (el) page.value = Math.round(el.scrollLeft / el.clientWidth);
+}
+function goPage(p: number) {
+  const el = pagerEl.value;
+  if (el) el.scrollTo({ left: p * el.clientWidth, behavior: "smooth" });
+}
+
+// --- music ---
+const uploadingTrack = ref(false);
+function pickTrack() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".mp3,.m4a,.aac,.ogg,.wav,audio/*";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    uploadingTrack.value = true;
+    try {
+      const err = await room.uploadMusic(file);
+      flash(err ?? "Track uploaded ♪");
+    } finally {
+      uploadingTrack.value = false;
+    }
+  };
+  input.click();
+}
+async function playTrack(id: number) {
+  const err = await room.playTrack(id);
+  if (err) flash(err);
+}
 const ready = ref(false); // hides the "Joining room…" screen once audio settles
 let readyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -220,6 +256,7 @@ function viewProfile(u: PublicUser) {
 onMounted(() => {
   room.kickedFrom = null;
   tryJoin();
+  room.loadMyTracks();
 });
 onUnmounted(() => {
   // Deliberately NOT leaving the room — minimizing keeps membership.
@@ -329,6 +366,13 @@ onUnmounted(() => {
         </div>
         <button
           class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
+          title="minimize room"
+          @click="minimize"
+        >
+          <Icon name="minimize" cls="size-4" />
+        </button>
+        <button
+          class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
           title="Room menu"
           @click="showMenu = true"
         >
@@ -344,299 +388,417 @@ onUnmounted(() => {
         </button>
       </header>
 
-      <!-- seats -->
-      <section class="px-2 py-3">
-        <div
-          v-if="room.layout === 'grid'"
-          class="grid grid-cols-5 gap-x-1 gap-y-2"
-        >
-          <SeatCell
-            v-for="(seat, i) in room.seats"
-            :key="i"
-            :seat="seat"
-            :index="i"
-            :role="seat ? roleOf(seat.id) : ''"
-            :requested="room.myRequestSeat === i"
-            :picking="pickingSeatFor !== null && !seat"
-            @tap="tapSeat(i)"
-          />
-        </div>
-        <div v-else class="flex flex-col items-center gap-3">
-          <!-- host couple pod, centered on top -->
-          <div
-            class="flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-500/10 via-fuchsia-500/10 to-amber-500/10 px-5 py-2"
-          >
-            <SeatCell
-              :seat="room.seats[0]"
-              :index="0"
-              :role="room.seats[0] ? roleOf(room.seats[0]!.id) : ''"
-              :requested="room.myRequestSeat === 0"
-              :picking="pickingSeatFor !== null && !room.seats[0]"
-              @tap="tapSeat(0)"
-            />
-            <div class="flex flex-col items-center">
-              <Icon name="heart" cls="size-4 text-fuchsia-400" />
-              <span
-                class="text-[8px] font-semibold tracking-wider text-amber-300/70"
-                >HOSTS</span
-              >
-            </div>
-            <SeatCell
-              :seat="room.seats[1]"
-              :index="1"
-              :role="room.seats[1] ? roleOf(room.seats[1]!.id) : ''"
-              :requested="room.myRequestSeat === 1"
-              :picking="pickingSeatFor !== null && !room.seats[1]"
-              @tap="tapSeat(1)"
-            />
-          </div>
-          <!-- 2×2 grid of couple pods -->
-          <div class="grid grid-cols-2 gap-2.5">
+      <!-- two swipable pages: 1) seats + chat, 2) utilities (music, games) -->
+      <div
+        ref="pagerEl"
+        class="scrollbar-none flex min-h-0 flex-1 snap-x snap-mandatory overflow-x-auto overflow-y-hidden"
+        @scroll.passive="onPagerScroll"
+      >
+        <section class="flex min-h-0 w-full shrink-0 snap-center flex-col">
+          <!-- seats -->
+          <section class="px-2 py-3">
             <div
-              v-for="pair in [
-                [2, 3],
-                [4, 5],
-                [6, 7],
-                [8, 9],
-              ]"
-              :key="pair[0]"
-              class="flex items-center gap-2 rounded-2xl border border-fuchsia-400/15 bg-white/[0.03] px-3 py-1.5"
+              v-if="room.layout === 'grid'"
+              class="grid grid-cols-5 gap-x-1 gap-y-2"
             >
               <SeatCell
-                :seat="room.seats[pair[0]]"
-                :index="pair[0]"
-                :role="
-                  room.seats[pair[0]] ? roleOf(room.seats[pair[0]]!.id) : ''
-                "
-                :requested="room.myRequestSeat === pair[0]"
-                :picking="pickingSeatFor !== null && !room.seats[pair[0]]"
-                @tap="tapSeat(pair[0])"
-              />
-              <Icon name="heart" cls="size-3 shrink-0 text-fuchsia-400/60" />
-              <SeatCell
-                :seat="room.seats[pair[1]]"
-                :index="pair[1]"
-                :role="
-                  room.seats[pair[1]] ? roleOf(room.seats[pair[1]]!.id) : ''
-                "
-                :requested="room.myRequestSeat === pair[1]"
-                :picking="pickingSeatFor !== null && !room.seats[pair[1]]"
-                @tap="tapSeat(pair[1])"
+                v-for="(seat, i) in room.seats"
+                :key="i"
+                :seat="seat"
+                :index="i"
+                :role="seat ? roleOf(seat.id) : ''"
+                :requested="room.myRequestSeat === i"
+                :picking="pickingSeatFor !== null && !seat"
+                @tap="tapSeat(i)"
               />
             </div>
-          </div>
-        </div>
+            <div v-else class="flex flex-col items-center gap-3">
+              <!-- host couple pod, centered on top -->
+              <div
+                class="flex items-center gap-3 rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-500/10 via-fuchsia-500/10 to-amber-500/10 px-5 py-2"
+              >
+                <SeatCell
+                  :seat="room.seats[0]"
+                  :index="0"
+                  :role="room.seats[0] ? roleOf(room.seats[0]!.id) : ''"
+                  :requested="room.myRequestSeat === 0"
+                  :picking="pickingSeatFor !== null && !room.seats[0]"
+                  @tap="tapSeat(0)"
+                />
+                <div class="flex flex-col items-center">
+                  <Icon name="heart" cls="size-4 text-fuchsia-400" />
+                  <span
+                    class="text-[8px] font-semibold tracking-wider text-amber-300/70"
+                    >HOSTS</span
+                  >
+                </div>
+                <SeatCell
+                  :seat="room.seats[1]"
+                  :index="1"
+                  :role="room.seats[1] ? roleOf(room.seats[1]!.id) : ''"
+                  :requested="room.myRequestSeat === 1"
+                  :picking="pickingSeatFor !== null && !room.seats[1]"
+                  @tap="tapSeat(1)"
+                />
+              </div>
+              <!-- 2×2 grid of couple pods -->
+              <div class="grid grid-cols-2 gap-2.5">
+                <div
+                  v-for="pair in [
+                    [2, 3],
+                    [4, 5],
+                    [6, 7],
+                    [8, 9],
+                  ]"
+                  :key="pair[0]"
+                  class="flex items-center gap-2 rounded-2xl border border-fuchsia-400/15 bg-white/[0.03] px-3 py-1.5"
+                >
+                  <SeatCell
+                    :seat="room.seats[pair[0]]"
+                    :index="pair[0]"
+                    :role="
+                      room.seats[pair[0]] ? roleOf(room.seats[pair[0]]!.id) : ''
+                    "
+                    :requested="room.myRequestSeat === pair[0]"
+                    :picking="pickingSeatFor !== null && !room.seats[pair[0]]"
+                    @tap="tapSeat(pair[0])"
+                  />
+                  <Icon
+                    name="heart"
+                    cls="size-3 shrink-0 text-fuchsia-400/60"
+                  />
+                  <SeatCell
+                    :seat="room.seats[pair[1]]"
+                    :index="pair[1]"
+                    :role="
+                      room.seats[pair[1]] ? roleOf(room.seats[pair[1]]!.id) : ''
+                    "
+                    :requested="room.myRequestSeat === pair[1]"
+                    :picking="pickingSeatFor !== null && !room.seats[pair[1]]"
+                    @tap="tapSeat(pair[1])"
+                  />
+                </div>
+              </div>
+            </div>
 
-        <div class="mt-1.5 flex items-center justify-between">
-          <p
-            class="flex items-center gap-1 text-[9px]"
-            :class="
-              room.audio === 'on' ? 'text-emerald-300/70' : 'text-white/25'
-            "
-          >
-            <span
-              class="size-1.5 rounded-full"
-              :class="{
-                'bg-emerald-400': room.audio === 'on',
-                'animate-pulse bg-amber-400': room.audio === 'connecting',
-                'bg-white/20':
-                  room.audio === 'off' || room.audio === 'unavailable',
-              }"
-            ></span>
-            {{
-              room.audio === "on"
-                ? "Audio connected"
-                : room.audio === "connecting"
-                  ? "Connecting audio…"
-                  : "Audio not set up yet"
-            }}
-          </p>
-          <button
-            v-if="!mySeat && room.myRequestSeat !== null"
-            class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-amber-300"
-            @click="room.cancelRequest()"
-          >
-            Cancel request
-          </button>
-        </div>
-        <p v-if="mySeat?.blocked" class="mt-1 text-[10px] text-red-300">
-          A moderator muted your mic — only they can unmute you.
-        </p>
-
-        <!-- pending seat requests (staff only) -->
-        <div
-          v-if="room.isStaff && room.requests.length"
-          class="mt-2 space-y-1.5"
-        >
-          <div
-            v-for="r in room.requests"
-            :key="r.user.id"
-            class="flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-xs"
-          >
-            <Avatar
-              :avatar="r.user.avatar"
-              :name="r.user.nickname"
-              :user-id="r.user.id"
-              :frame="r.user.frame"
-              size-class="size-6 text-[10px]"
-              fallback="initial"
-            />
-            <span class="min-w-0 flex-1 truncate text-white/70"
-              >{{ r.user.nickname }} wants seat {{ r.seat + 1 }}</span
-            >
-            <button
-              class="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[10px] font-semibold text-black"
-              @click="room.grantSeat(r.user.id)"
-            >
-              Allow
-            </button>
-            <button
-              class="rounded-full bg-surface-2 px-2.5 py-0.5 text-[10px] text-white/50"
-              @click="room.denySeat(r.user.id)"
-            >
-              Deny
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <!-- chat -->
-      <div ref="listEl" class="flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
-        <p
-          v-if="!room.messages.length"
-          class="py-6 text-center text-xs text-white/30"
-        >
-          It's quiet in here… say hi
-        </p>
-        <template v-for="m in room.messages" :key="m.id">
-          <p v-if="m.system" class="text-center text-[10px] text-white/35">
-            {{ m.text }}
-          </p>
-          <div v-else class="flex items-start gap-2.5">
-            <Avatar
-              :avatar="m.avatar"
-              :name="m.author"
-              :user-id="m.userId"
-              :frame="m.frame"
-              size-class="size-8 text-xs"
-              fallback="initial"
-            />
-            <div class="min-w-0 flex-1">
+            <div class="mt-1.5 flex items-center justify-between">
               <p
-                class="text-[10px]"
+                class="flex items-center gap-1 text-[9px]"
                 :class="
-                  m.userId === app.user?.id
-                    ? 'text-fuchsia-300/80'
-                    : 'text-white/40'
+                  room.audio === 'on' ? 'text-emerald-300/70' : 'text-white/25'
                 "
               >
-                {{ m.author }}
+                <span
+                  class="size-1.5 rounded-full"
+                  :class="{
+                    'bg-emerald-400': room.audio === 'on',
+                    'animate-pulse bg-amber-400': room.audio === 'connecting',
+                    'bg-white/20':
+                      room.audio === 'off' || room.audio === 'unavailable',
+                  }"
+                ></span>
+                {{
+                  room.audio === "on"
+                    ? "Audio connected"
+                    : room.audio === "connecting"
+                      ? "Connecting audio…"
+                      : "Audio not set up yet"
+                }}
+              </p>
+              <button
+                v-if="!mySeat && room.myRequestSeat !== null"
+                class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-amber-300"
+                @click="room.cancelRequest()"
+              >
+                Cancel request
+              </button>
+            </div>
+            <p v-if="mySeat?.blocked" class="mt-1 text-[10px] text-red-300">
+              A moderator muted your mic — only they can unmute you.
+            </p>
+
+            <!-- pending seat requests (staff only) -->
+            <div
+              v-if="room.isStaff && room.requests.length"
+              class="mt-2 space-y-1.5"
+            >
+              <div
+                v-for="r in room.requests"
+                :key="r.user.id"
+                class="flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-1.5 text-xs"
+              >
+                <Avatar
+                  :avatar="r.user.avatar"
+                  :name="r.user.nickname"
+                  :user-id="r.user.id"
+                  :frame="r.user.frame"
+                  size-class="size-6 text-[10px]"
+                  fallback="initial"
+                />
+                <span class="min-w-0 flex-1 truncate text-white/70"
+                  >{{ r.user.nickname }} wants seat {{ r.seat + 1 }}</span
+                >
+                <button
+                  class="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[10px] font-semibold text-black"
+                  @click="room.grantSeat(r.user.id)"
+                >
+                  Allow
+                </button>
+                <button
+                  class="rounded-full bg-surface-2 px-2.5 py-0.5 text-[10px] text-white/50"
+                  @click="room.denySeat(r.user.id)"
+                >
+                  Deny
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- chat -->
+          <div
+            ref="listEl"
+            class="flex-1 space-y-2.5 overflow-y-auto px-4 py-3"
+          >
+            <p
+              v-if="!room.messages.length"
+              class="py-6 text-center text-xs text-white/30"
+            >
+              It's quiet in here… say hi
+            </p>
+            <template v-for="m in room.messages" :key="m.id">
+              <p v-if="m.system" class="text-center text-[10px] text-white/35">
+                {{ m.text }}
+              </p>
+              <div v-else class="flex items-start gap-2.5">
+                <Avatar
+                  :avatar="m.avatar"
+                  :name="m.author"
+                  :user-id="m.userId"
+                  :frame="m.frame"
+                  size-class="size-8 text-xs"
+                  fallback="initial"
+                />
+                <div class="min-w-0 flex-1">
+                  <p
+                    class="text-[10px]"
+                    :class="
+                      m.userId === app.user?.id
+                        ? 'text-fuchsia-300/80'
+                        : 'text-white/40'
+                    "
+                  >
+                    {{ m.author }}
+                  </p>
+                  <div
+                    class="mt-1 inline-block max-w-[85%] rounded-xl rounded-tl-[4px] px-3 py-1.5 text-sm leading-snug break-words"
+                    :class="
+                      m.userId === app.user?.id
+                        ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
+                        : 'bg-surface-2'
+                    "
+                  >
+                    {{ m.text }}
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- bottom action bar -->
+          <footer class="flex items-center gap-2 border-t border-line p-3 pb-2">
+            <template v-if="room.iAmDisabled">
+              <div
+                class="flex-1 rounded-full bg-red-500/10 px-4 py-2.5 text-center text-sm text-red-300"
+              >
+                A moderator disabled you — you can't talk or type
+              </div>
+            </template>
+            <template v-else-if="!composing">
+              <button
+                class="flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-left text-sm text-white/30"
+                @click="openComposer"
+              >
+                Say something…
+              </button>
+              <button
+                class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-amber-300"
+                title="Inventory & gifts"
+                @click="showInventory = true"
+              >
+                <Icon name="gift" cls="size-4.5" />
+              </button>
+
+              <button
+                v-if="mySeat"
+                class="grid size-10 shrink-0 place-items-center rounded-full"
+                :class="
+                  mySeat.blocked
+                    ? 'bg-red-500/20 text-red-400'
+                    : mySeat.muted
+                      ? 'bg-white text-black'
+                      : 'bg-emerald-500/20 text-emerald-300'
+                "
+                :title="
+                  mySeat.blocked
+                    ? 'Muted by a moderator'
+                    : mySeat.muted
+                      ? 'Unmute'
+                      : 'Mute'
+                "
+                :disabled="mySeat.blocked"
+                @click="room.setMuted(!mySeat.muted)"
+              >
+                <Icon
+                  :name="mySeat.muted || mySeat.blocked ? 'mic-off' : 'mic'"
+                  cls="size-4.5"
+                />
+              </button>
+              <button
+                v-if="mySeat"
+                class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-white/60"
+                title="Step down from seat"
+                @click="room.leaveSeat()"
+              >
+                <Icon name="step-down" cls="size-4.5" />
+              </button>
+            </template>
+            <template v-else>
+              <input
+                ref="inputEl"
+                v-model="draft"
+                placeholder="Say something…"
+                class="min-w-0 flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-sm outline-none placeholder:text-white/25 focus:border-fuchsia-400/50"
+                @keydown.enter="send"
+                @blur="onInputBlur"
+              />
+              <button
+                class="shrink-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-2.5 text-sm font-semibold disabled:opacity-40"
+                :disabled="!draft.trim()"
+                @click="send"
+              >
+                Send
+              </button>
+            </template>
+          </footer>
+        </section>
+
+        <!-- page 2: utilities -->
+        <section
+          class="flex min-h-0 w-full shrink-0 snap-center flex-col gap-4 overflow-y-auto p-4"
+        >
+          <!-- music player -->
+          <div class="rounded-2xl border border-line bg-surface p-4">
+            <p class="flex items-center gap-2 text-sm font-semibold">♪ Music</p>
+
+            <div v-if="room.music" class="mt-3 rounded-xl bg-surface-2 p-3">
+              <p class="truncate text-sm font-medium">{{ room.music.name }}</p>
+              <p class="text-[10px] text-white/40">
+                played by {{ room.music.ownerName }}
+              </p>
+              <div class="mt-2.5 flex items-center gap-2">
+                <template v-if="room.canControlMusic()">
+                  <button
+                    class="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 py-1.5 text-xs font-semibold"
+                    @click="
+                      room.music.playing
+                        ? room.pauseMusic()
+                        : room.resumeMusic()
+                    "
+                  >
+                    {{ room.music.playing ? "Pause" : "Resume" }}
+                  </button>
+                  <button
+                    class="rounded-full bg-surface px-4 py-1.5 text-xs text-red-300"
+                    @click="room.stopMusic()"
+                  >
+                    Stop
+                  </button>
+                </template>
+                <span v-else class="text-[10px] text-white/40">{{
+                  room.music.playing ? "Now playing" : "Paused"
+                }}</span>
+                <button
+                  v-if="room.musicBlocked"
+                  class="rounded-full bg-amber-400/15 px-3 py-1.5 text-xs font-semibold text-amber-300"
+                  @click="room.tapToHearMusic()"
+                >
+                  ▶ Tap to hear
+                </button>
+              </div>
+            </div>
+            <p v-else class="mt-3 text-xs text-white/40">
+              Nothing playing — start one of your tracks below.
+            </p>
+
+            <div class="mt-4 flex items-center justify-between">
+              <p class="text-xs font-semibold text-white/60">My tracks</p>
+              <button
+                class="rounded-full bg-surface-2 px-3 py-1.5 text-xs font-medium text-fuchsia-300 disabled:opacity-40"
+                :disabled="uploadingTrack"
+                @click="pickTrack"
+              >
+                {{ uploadingTrack ? "Uploading…" : "+ Upload" }}
+              </button>
+            </div>
+            <p class="mt-1 text-[10px] text-white/30">
+              MP3 / M4A / AAC / OGG / WAV, up to 15 MB. Yours forever, playable
+              in any room.
+            </p>
+            <div class="mt-2 space-y-1.5">
+              <p
+                v-if="!room.myTracks.length"
+                class="py-3 text-center text-xs text-white/30"
+              >
+                No tracks yet
               </p>
               <div
-                class="mt-1 inline-block max-w-[85%] rounded-xl rounded-tl-[4px] px-3 py-1.5 text-sm leading-snug break-words"
-                :class="
-                  m.userId === app.user?.id
-                    ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500'
-                    : 'bg-surface-2'
-                "
+                v-for="t in room.myTracks"
+                :key="t.id"
+                class="flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2"
               >
-                {{ m.text }}
+                <span class="min-w-0 flex-1 truncate text-xs">{{
+                  t.name
+                }}</span>
+                <button
+                  class="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-semibold text-emerald-300"
+                  @click="playTrack(t.id)"
+                >
+                  Play
+                </button>
+                <button
+                  class="rounded-full bg-surface px-2 py-1 text-[11px] text-white/40"
+                  @click="room.deleteMusic(t.id)"
+                >
+                  ✕
+                </button>
               </div>
             </div>
           </div>
-        </template>
+
+          <!-- minigames placeholder -->
+          <div
+            class="rounded-2xl border border-dashed border-line p-4 text-center"
+          >
+            <p class="text-sm font-semibold text-white/60">🎲 Minigames</p>
+            <p class="mt-1 text-xs text-white/30">
+              Coming soon — this page will host in-room games.
+            </p>
+          </div>
+        </section>
       </div>
 
-      <!-- bottom action bar -->
-      <footer class="flex items-center gap-2 border-t border-line p-3 pb-2">
-        <template v-if="room.iAmDisabled">
-          <div
-            class="flex-1 rounded-full bg-red-500/10 px-4 py-2.5 text-center text-sm text-red-300"
-          >
-            A moderator disabled you — you can't talk or type
-          </div>
-        </template>
-        <template v-else-if="!composing">
-          <button
-            class="flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-left text-sm text-white/30"
-            @click="openComposer"
-          >
-            Say something…
-          </button>
-          <button
-            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-amber-300"
-            title="Inventory & gifts"
-            @click="showInventory = true"
-          >
-            <Icon name="gift" cls="size-4.5" />
-          </button>
-          <button
-            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-white/60"
-            title="minimize"
-            @click="minimize"
-          >
-            <Icon name="minimize" cls="size-4.5" />
-          </button>
-          <button
-            v-if="mySeat"
-            class="grid size-10 shrink-0 place-items-center rounded-full"
-            :class="
-              mySeat.blocked
-                ? 'bg-red-500/20 text-red-400'
-                : mySeat.muted
-                  ? 'bg-white text-black'
-                  : 'bg-emerald-500/20 text-emerald-300'
-            "
-            :title="
-              mySeat.blocked
-                ? 'Muted by a moderator'
-                : mySeat.muted
-                  ? 'Unmute'
-                  : 'Mute'
-            "
-            :disabled="mySeat.blocked"
-            @click="room.setMuted(!mySeat.muted)"
-          >
-            <Icon
-              :name="mySeat.muted || mySeat.blocked ? 'mic-off' : 'mic'"
-              cls="size-4.5"
-            />
-          </button>
-          <button
-            v-if="mySeat"
-            class="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-white/60"
-            title="Step down from seat"
-            @click="room.leaveSeat()"
-          >
-            <Icon name="step-down" cls="size-4.5" />
-          </button>
-        </template>
-        <template v-else>
-          <input
-            ref="inputEl"
-            v-model="draft"
-            placeholder="Say something…"
-            class="min-w-0 flex-1 rounded-full border border-line bg-surface px-4 py-2.5 text-sm outline-none placeholder:text-white/25 focus:border-fuchsia-400/50"
-            @keydown.enter="send"
-            @blur="onInputBlur"
-          />
-          <button
-            class="shrink-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-5 py-2.5 text-sm font-semibold disabled:opacity-40"
-            :disabled="!draft.trim()"
-            @click="send"
-          >
-            Send
-          </button>
-        </template>
-      </footer>
-
-      <!-- minimize bar under the actions -->
-      <!-- <button
-        class="flex items-center justify-center gap-1.5 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] text-[11px] text-white/40 active:text-white/70"
-        @click="minimize"
+      <!-- page dots -->
+      <div
+        class="flex items-center justify-center gap-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <Icon name="minimize" cls="size-3.5" /> Minimize — stay in the room
-      </button> -->
+        <button
+          v-for="p in 2"
+          :key="p"
+          class="size-1.5 rounded-full transition-colors"
+          :class="page === p - 1 ? 'bg-fuchsia-400' : 'bg-white/20'"
+          @click="goPage(p - 1)"
+        ></button>
+      </div>
 
       <!-- members sheet -->
       <div

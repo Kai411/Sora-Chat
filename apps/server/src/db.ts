@@ -77,6 +77,14 @@ db.exec(`
     src TEXT NOT NULL,
     PRIMARY KEY (user_id, type, src)
   );
+  CREATE TABLE IF NOT EXISTS music (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    name TEXT NOT NULL,
+    src TEXT NOT NULL,
+    created INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_music_user ON music (user_id);
   CREATE TABLE IF NOT EXISTS shop_items (
     id INTEGER PRIMARY KEY,
     type TEXT NOT NULL,

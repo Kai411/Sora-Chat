@@ -56,6 +56,18 @@ interface LiveRoom {
   disabled: Set<number>; // muted + typing blocked by a moderator
   layout: SeatLayout;
   background: string | null; // preset background image path
+  music: RoomMusic | null;
+}
+
+interface RoomMusic {
+  trackId: number;
+  src: string;
+  name: string;
+  ownerId: number;
+  ownerName: string;
+  playing: boolean;
+  startedAt: number; // epoch ms when (re)started
+  offset: number; // seconds already played before startedAt
 }
 
 interface RoomMsg {
@@ -358,6 +370,23 @@ function serializeFeedRow(row: any, viewerId: number) {
 // ---------------------------------------------------------------------------
 
 const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpeg: "image/jpeg", jpg: "image/jpeg", webp: "image/webp" };
+const AUDIO_TYPES: Record<string, string> = {
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
+};
+const ASSET_TYPES: Record<string, string> = { ...IMAGE_TYPES, ...AUDIO_TYPES };
+const MAX_MUSIC_BYTES = 15_000_000;
+
+const insertMusic = db.prepare("INSERT INTO music (user_id, name, src, created) VALUES (?, ?, ?, ?)");
+const listMusic = db.prepare<[number], { id: number; name: string; src: string }>(
+  "SELECT id, name, src FROM music WHERE user_id = ? ORDER BY id DESC"
+);
+const getMusic = db.prepare<[number], { id: number; user_id: number; name: string; src: string }>(
+  "SELECT id, user_id, name, src FROM music WHERE id = ?"
+);
 const MAX_IMAGE_BYTES = 2_000_000;
 
 function saveDataUrlImage(dataUrl: string): string | null {
@@ -375,6 +404,12 @@ function saveDataUrlImage(dataUrl: string): string | null {
 // ---------------------------------------------------------------------------
 
 const httpServer = createServer((req, res) => {
+  // CORS: the SPA on Netlify calls the upload endpoint cross-origin.
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-headers", "authorization, x-filename, content-type");
+  res.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+  if (req.method === "OPTIONS") return void res.writeHead(204).end();
+
   if (req.url === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ok: true, online: online.size }));
@@ -382,7 +417,7 @@ const httpServer = createServer((req, res) => {
   }
   if (req.url?.startsWith("/uploads/")) {
     const file = basename(req.url); // strips any path tricks
-    const type = IMAGE_TYPES[extname(file).slice(1)];
+    const type = ASSET_TYPES[extname(file).slice(1).toLowerCase()];
     const path = join(UPLOAD_DIR, file);
     if (!type || !existsSync(path)) {
       res.writeHead(404).end();
@@ -390,6 +425,40 @@ const httpServer = createServer((req, res) => {
     }
     res.writeHead(200, { "content-type": type, "cache-control": "public, max-age=31536000, immutable" });
     createReadStream(path).pipe(res);
+    return;
+  }
+  // Music upload: raw file body, filename in x-filename, Supabase token in
+  // Authorization. Files persist in the user's library (music table).
+  if (req.url === "/music" && req.method === "POST") {
+    const fail = (code: number, error: string) => {
+      res.writeHead(code, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error }));
+    };
+    const token = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
+    const filename = String(req.headers["x-filename"] ?? "track");
+    const ext = extname(filename).slice(1).toLowerCase();
+    if (!AUDIO_TYPES[ext]) return fail(400, "Use MP3, M4A, AAC, OGG or WAV");
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > MAX_MUSIC_BYTES) {
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", async () => {
+      if (size === 0 || size > MAX_MUSIC_BYTES) return fail(400, "File must be under 15 MB");
+      const auth = await verifySupabaseToken(token);
+      if ("error" in auth) return fail(401, auth.error);
+      const file = `${randomUUID()}.${ext}`;
+      writeFileSync(join(UPLOAD_DIR, file), Buffer.concat(chunks));
+      const name = basename(filename, extname(filename)).slice(0, 60) || "Track";
+      const info = insertMusic.run(auth.user.id, name, `/uploads/${file}`, Date.now());
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: Number(info.lastInsertRowid), name, src: `/uploads/${file}` }));
+    });
     return;
   }
   res.writeHead(404).end();
@@ -476,6 +545,13 @@ function rebroadcastUserRooms(userId: number) {
   for (const r of rooms.values()) {
     if (roomMembers(r.id).some((m: any) => m.id === userId)) broadcastRoom(r);
   }
+}
+
+function musicPayload(r: LiveRoom) {
+  return { roomId: r.id, music: r.music, serverNow: Date.now() };
+}
+function broadcastMusic(r: LiveRoom) {
+  io.to(`room:${r.id}`).emit("room:music", musicPayload(r));
 }
 
 // System notice in the room chat (moderation actions, etc.).
@@ -651,6 +727,7 @@ io.on("connection", (socket: Socket) => {
       disabled: new Set(),
       layout: "grid",
       background: null,
+      music: null,
     };
     rooms.set(room.id, room);
     roomMessages.set(room.id, []);
@@ -676,6 +753,7 @@ io.on("connection", (socket: Socket) => {
       members: roomMembers(roomId),
       state: roomState(r),
       myInviteSeat: r.invites.get(user.id) ?? null,
+      music: musicPayload(r),
     });
     io.to(`room:${roomId}`).emit("room:members", { roomId, members: roomMembers(roomId) });
     broadcastRoom(r);
@@ -929,6 +1007,70 @@ io.on("connection", (socket: Socket) => {
     }
     broadcastRoom(r);
     ack?.({ ok: true });
+  });
+
+  // --- room music (player lives on page 2 of the room) -----------------------
+
+  socket.on("music:list", (ack) => {
+    if (!user) return ack?.([]);
+    ack?.(listMusic.all(user.id));
+  });
+
+  socket.on("music:delete", ({ id }, ack) => {
+    if (!user) return;
+    const track = getMusic.get(Number(id));
+    if (!track || track.user_id !== user.id) return ack?.({ error: "Not your track" });
+    db.prepare("DELETE FROM music WHERE id = ?").run(track.id);
+    ack?.(listMusic.all(user.id));
+  });
+
+  // Anyone in the room can play their OWN uploaded track; the person who
+  // started it and host/admins can pause/resume/stop.
+  const canControlMusic = (r: LiveRoom) => !!user && !!r.music && (r.music.ownerId === user.id || isStaff(r, user.id));
+
+  socket.on("room:musicPlay", ({ roomId, id }, ack) => {
+    const r = rooms.get(roomId);
+    const track = getMusic.get(Number(id));
+    if (!user || !r || !track) return ack?.({ error: "Track not found" });
+    if (track.user_id !== user.id) return ack?.({ error: "You can only play your own uploads" });
+    if (!roomMembers(roomId).some((m: any) => m.id === user!.id)) return ack?.({ error: "Join the room first" });
+    if (r.music && !canControlMusic(r)) return ack?.({ error: "Someone else's track is playing" });
+    r.music = {
+      trackId: track.id,
+      src: track.src,
+      name: track.name,
+      ownerId: user.id,
+      ownerName: user.nickname,
+      playing: true,
+      startedAt: Date.now(),
+      offset: 0,
+    };
+    systemMessage(r, `${user.nickname} started playing ♪ ${track.name}`);
+    broadcastMusic(r);
+    ack?.({ ok: true });
+  });
+
+  socket.on("room:musicPause", ({ roomId }) => {
+    const r = rooms.get(roomId);
+    if (!r?.music?.playing || !canControlMusic(r)) return;
+    r.music.offset += (Date.now() - r.music.startedAt) / 1000;
+    r.music.playing = false;
+    broadcastMusic(r);
+  });
+
+  socket.on("room:musicResume", ({ roomId }) => {
+    const r = rooms.get(roomId);
+    if (!r?.music || r.music.playing || !canControlMusic(r)) return;
+    r.music.startedAt = Date.now();
+    r.music.playing = true;
+    broadcastMusic(r);
+  });
+
+  socket.on("room:musicStop", ({ roomId }) => {
+    const r = rooms.get(roomId);
+    if (!r?.music || !canControlMusic(r)) return;
+    r.music = null;
+    broadcastMusic(r);
   });
 
   // --- direct messages -------------------------------------------------------

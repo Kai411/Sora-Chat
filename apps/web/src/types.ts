@@ -16,6 +16,23 @@ export interface ShopCategory {
   equipped: string | null;
 }
 
+export interface MusicTrack {
+  id: number;
+  name: string;
+  src: string;
+}
+
+export interface RoomMusic {
+  trackId: number;
+  src: string;
+  name: string;
+  ownerId: number;
+  ownerName: string;
+  playing: boolean;
+  startedAt: number;
+  offset: number;
+}
+
 export interface AdminItem {
   id: number;
   type: ShopType;

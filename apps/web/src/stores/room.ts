@@ -1,13 +1,24 @@
 import { defineStore } from "pinia";
 import type { Room as LiveKitRoom } from "livekit-client";
-import { socket } from "../lib/socket";
+import { assetUrl, serverBase, socket } from "../lib/socket";
+import { supabase } from "../lib/supabase";
 import { useAppStore } from "./app";
-import type { PublicUser, RoomInfo, RoomMsg, RoomState, Seat, SeatLayout } from "../types";
+import type { MusicTrack, PublicUser, RoomInfo, RoomMsg, RoomMusic, RoomState, Seat, SeatLayout } from "../types";
 
 // LiveKit connection lives at module scope (non-reactive) so audio survives
 // minimizing the room; only the status string is reactive state.
 let lkRoom: LiveKitRoom | null = null;
 let lkAudioEls: HTMLMediaElement[] = [];
+
+// Shared room music player — module scope so it keeps playing while minimized.
+let musicEl: HTMLAudioElement | null = null;
+function ensureMusicEl(): HTMLAudioElement {
+  if (!musicEl) {
+    musicEl = new Audio();
+    musicEl.preload = "auto";
+  }
+  return musicEl;
+}
 
 export type RoomAudioStatus = "off" | "connecting" | "on" | "unavailable";
 
@@ -108,6 +119,10 @@ export const useRoomStore = defineStore("room", {
     background: null as string | null,
     kickedFrom: null as string | null, // room name we were just kicked from
     speaking: [] as number[], // user ids currently talking (from LiveKit)
+    music: null as RoomMusic | null,
+    musicClockSkew: 0, // serverNow - clientNow, for position sync
+    musicBlocked: false, // autoplay was blocked; needs a user tap
+    myTracks: [] as MusicTrack[],
   }),
   getters: {
     myUserId(): number {
@@ -154,8 +169,15 @@ export const useRoomStore = defineStore("room", {
       socket.on("room:kicked", ({ roomId, roomName }: { roomId: string; roomName: string }) => {
         if (roomId !== this.room?.id) return;
         this.disconnectAudio();
+        this.stopMusicLocal();
         this.$reset();
         this.kickedFrom = roomName;
+      });
+      socket.on("room:music", (payload: { roomId: string; music: RoomMusic | null; serverNow: number }) => {
+        if (payload.roomId !== this.room?.id) return;
+        this.musicClockSkew = payload.serverNow - Date.now();
+        this.music = payload.music;
+        this.syncMusic();
       });
     },
     /** Returns true on success, or the join error string ("pin_required" | "pin_wrong"). */
@@ -172,6 +194,11 @@ export const useRoomStore = defineStore("room", {
       this.inviteSeat = res.myInviteSeat;
       this.unread = 0;
       this.connectAudio();
+      if (res.music) {
+        this.musicClockSkew = res.music.serverNow - Date.now();
+        this.music = res.music.music;
+        this.syncMusic();
+      }
       return true;
     },
     applyState(state: RoomState) {
@@ -198,7 +225,85 @@ export const useRoomStore = defineStore("room", {
     leave() {
       if (this.room) socket.emit("room:leave", { roomId: this.room.id });
       this.disconnectAudio();
+      this.stopMusicLocal();
       this.$reset();
+    },
+    // ---- room music -------------------------------------------------------
+    /** Align the local <audio> with the shared room state. */
+    syncMusic() {
+      const el = ensureMusicEl();
+      const m = this.music;
+      if (!m) {
+        el.pause();
+        el.removeAttribute("src");
+        return;
+      }
+      const src = new URL(assetUrl(m.src), serverBase || window.location.origin).href;
+      if (el.src !== src) el.src = src;
+      const position = m.offset + (m.playing ? (Date.now() + this.musicClockSkew - m.startedAt) / 1000 : 0);
+      if (Math.abs(el.currentTime - position) > 1.5) el.currentTime = Math.max(0, position);
+      if (m.playing) {
+        el.play()
+          .then(() => (this.musicBlocked = false))
+          .catch(() => (this.musicBlocked = true)); // autoplay policy — needs a tap
+      } else {
+        el.pause();
+      }
+    },
+    /** Retry after an autoplay block, from a user gesture. */
+    tapToHearMusic() {
+      this.musicBlocked = false;
+      this.syncMusic();
+    },
+    stopMusicLocal() {
+      musicEl?.pause();
+      musicEl?.removeAttribute("src");
+    },
+    async loadMyTracks() {
+      this.myTracks = (await socket.emitWithAck("music:list")) ?? [];
+    },
+    async uploadMusic(file: File): Promise<string | null> {
+      if (!supabase) return "Not signed in";
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) return "Not signed in";
+      try {
+        const res = await fetch(`${serverBase}/music`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${data.session.access_token}`,
+            "x-filename": file.name,
+            "content-type": "application/octet-stream",
+          },
+          body: file,
+        });
+        const body = await res.json();
+        if (body.error) return body.error;
+        this.myTracks = [body, ...this.myTracks];
+        return null;
+      } catch {
+        return "Upload failed — check your connection";
+      }
+    },
+    async deleteMusic(id: number) {
+      const res = await socket.emitWithAck("music:delete", { id });
+      if (Array.isArray(res)) this.myTracks = res;
+    },
+    async playTrack(id: number): Promise<string | null> {
+      if (!this.room) return null;
+      const res = await socket.emitWithAck("room:musicPlay", { roomId: this.room.id, id });
+      return res?.error ?? null;
+    },
+    pauseMusic() {
+      if (this.room) socket.emit("room:musicPause", { roomId: this.room.id });
+    },
+    resumeMusic() {
+      if (this.room) socket.emit("room:musicResume", { roomId: this.room.id });
+    },
+    stopMusic() {
+      if (this.room) socket.emit("room:musicStop", { roomId: this.room.id });
+    },
+    canControlMusic(): boolean {
+      return !!this.music && (this.music.ownerId === this.myUserId || this.isStaff);
     },
     /** Connect to the room's LiveKit session; remote audio plays via hidden elements. */
     async connectAudio() {

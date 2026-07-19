@@ -23,16 +23,23 @@ const speaking = () => !!props.seat && room.speaking.includes(props.seat.id);
     @click="emit('tap')"
   >
     <template v-if="seat">
-      <Avatar
-        :avatar="seat.avatar"
-        :name="seat.nickname"
-        :user-id="seat.id"
-        :frame="seat.frame"
-        :frame-fit="2"
-        :class="speaking() && 'anim-speak'"
-        size-class="size-14 text-lg"
-        fallback="initial"
-      />
+      <span class="relative inline-grid place-items-center">
+        <template v-if="speaking()">
+          <span class="speak-wave pointer-events-none absolute inset-0 rounded-full bg-gradient-to-br from-fuchsia-400/50 to-violet-400/30"></span>
+          <span class="speak-wave pointer-events-none absolute inset-0 rounded-full border-2 border-fuchsia-300/50" style="animation-delay: 0.6s"></span>
+          <span class="speak-wave pointer-events-none absolute inset-0 rounded-full border border-cyan-300/40" style="animation-delay: 1.2s"></span>
+        </template>
+        <Avatar
+          :avatar="seat.avatar"
+          :name="seat.nickname"
+          :user-id="seat.id"
+          :frame="seat.frame"
+          :frame-fit="2"
+          :class="speaking() && 'anim-speak'"
+          size-class="size-14 text-lg"
+          fallback="initial"
+        />
+      </span>
       <span
         class="flex h-3 items-center gap-1 text-[9px] font-semibold"
         :class="
