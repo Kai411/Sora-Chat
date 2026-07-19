@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts"
+    "dev": "tsx watch src/boot.ts",
+    "start": "tsx src/boot.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.7",
     "better-sqlite3": "^11.8.1",
     "livekit-server-sdk": "^2.17.0",
     "socket.io": "^4.8.1"

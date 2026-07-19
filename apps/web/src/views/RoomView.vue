@@ -730,6 +730,21 @@ onUnmounted(() => {
               Nothing playing — start one of your tracks below.
             </p>
 
+            <!-- per-listener music volume (only affects your own ears) -->
+            <div v-if="room.music" class="mt-3 flex items-center gap-2.5">
+              <span class="text-sm">{{ room.musicVolume === 0 ? "🔇" : room.musicVolume < 0.5 ? "🔉" : "🔊" }}</span>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                :value="room.musicVolume"
+                class="h-1 min-w-0 flex-1 cursor-pointer accent-fuchsia-400"
+                @input="room.setMusicVolume(Number(($event.target as HTMLInputElement).value))"
+              />
+              <span class="w-8 text-right text-[10px] tabular-nums text-white/40">{{ Math.round(room.musicVolume * 100) }}%</span>
+            </div>
+
             <div class="mt-4 flex items-center justify-between">
               <p class="text-xs font-semibold text-white/60">My tracks</p>
               <button

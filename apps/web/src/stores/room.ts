@@ -122,6 +122,7 @@ export const useRoomStore = defineStore("room", {
     music: null as RoomMusic | null,
     musicClockSkew: 0, // serverNow - clientNow, for position sync
     musicBlocked: false, // autoplay was blocked; needs a user tap
+    musicVolume: Math.min(1, Math.max(0, Number(localStorage.getItem("sora:musicVol") ?? 0.7))),
     myTracks: [] as MusicTrack[],
   }),
   getters: {
@@ -240,6 +241,7 @@ export const useRoomStore = defineStore("room", {
       }
       const src = new URL(assetUrl(m.src), serverBase || window.location.origin).href;
       if (el.src !== src) el.src = src;
+      el.volume = this.musicVolume;
       const position = m.offset + (m.playing ? (Date.now() + this.musicClockSkew - m.startedAt) / 1000 : 0);
       if (Math.abs(el.currentTime - position) > 1.5) el.currentTime = Math.max(0, position);
       if (m.playing) {
@@ -254,6 +256,12 @@ export const useRoomStore = defineStore("room", {
     tapToHearMusic() {
       this.musicBlocked = false;
       this.syncMusic();
+    },
+    /** Per-listener music volume (0–1), remembered across rooms. */
+    setMusicVolume(v: number) {
+      this.musicVolume = Math.min(1, Math.max(0, v));
+      if (musicEl) musicEl.volume = this.musicVolume;
+      localStorage.setItem("sora:musicVol", String(this.musicVolume));
     },
     stopMusicLocal() {
       musicEl?.pause();

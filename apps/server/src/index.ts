@@ -8,6 +8,7 @@ import { Server, type Socket } from "socket.io";
 import { AccessToken } from "livekit-server-sdk";
 import { db, getUserById, publicUser, type UserRow } from "./db";
 import { verifySupabaseToken } from "./auth";
+import { startSnapshotLoop, uploadMedia } from "./persist";
 
 const PORT = Number(process.env.PORT) || 3001;
 const UPLOAD_DIR = process.env.UPLOAD_DIR ?? "uploads";
@@ -389,12 +390,16 @@ const getMusic = db.prepare<[number], { id: number; user_id: number; name: strin
 );
 const MAX_IMAGE_BYTES = 2_000_000;
 
-function saveDataUrlImage(dataUrl: string): string | null {
+async function saveDataUrlImage(dataUrl: string): Promise<string | null> {
   const m = /^data:image\/(png|jpeg|jpg|webp);base64,(.+)$/.exec(dataUrl);
   if (!m) return null;
   const buf = Buffer.from(m[2], "base64");
   if (!buf.length || buf.length > MAX_IMAGE_BYTES) return null;
-  const file = `${randomUUID()}.${m[1] === "jpg" ? "jpeg" : m[1]}`;
+  const ext = m[1] === "jpg" ? "jpeg" : m[1];
+  const file = `${randomUUID()}.${ext}`;
+  // Prefer Supabase Storage (survives redeploys); fall back to local disk.
+  const url = await uploadMedia(`img/${file}`, buf, IMAGE_TYPES[ext]);
+  if (url) return url;
   writeFileSync(join(UPLOAD_DIR, file), buf);
   return `/uploads/${file}`;
 }
@@ -458,11 +463,17 @@ const httpServer = createServer((req, res) => {
       const auth = await verifySupabaseToken(token);
       if ("error" in auth) return fail(401, auth.error);
       const file = `${randomUUID()}.${ext}`;
-      writeFileSync(join(UPLOAD_DIR, file), Buffer.concat(chunks));
+      const buf = Buffer.concat(chunks);
+      // Prefer Supabase Storage (survives redeploys); fall back to local disk.
+      let src = await uploadMedia(`music/${file}`, buf, AUDIO_TYPES[ext]);
+      if (!src) {
+        writeFileSync(join(UPLOAD_DIR, file), buf);
+        src = `/uploads/${file}`;
+      }
       const name = basename(filename, extname(filename)).slice(0, 60) || "Track";
-      const info = insertMusic.run(auth.user.id, name, `/uploads/${file}`, Date.now());
+      const info = insertMusic.run(auth.user.id, name, src, Date.now());
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ id: Number(info.lastInsertRowid), name, src: `/uploads/${file}` }));
+      res.end(JSON.stringify({ id: Number(info.lastInsertRowid), name, src }));
     });
     return;
   }
@@ -1190,11 +1201,11 @@ io.on("connection", (socket: Socket) => {
     ack?.(feedByUser.all({ viewer: user.id, target }).map((r) => serializeFeedRow(r, user!.id)));
   });
 
-  socket.on("feed:post", ({ text, image }, ack) => {
+  socket.on("feed:post", async ({ text, image }, ack) => {
     const t = String(text ?? "").trim().slice(0, 500);
     let imagePath: string | null = null;
     if (typeof image === "string" && image) {
-      imagePath = saveDataUrlImage(image);
+      imagePath = await saveDataUrlImage(image);
       if (!imagePath) return ack?.({ error: "Image must be PNG/JPEG/WebP under 2 MB" });
     }
     if (!user || (!t && !imagePath)) return ack?.(null);
@@ -1267,15 +1278,15 @@ io.on("connection", (socket: Socket) => {
     });
   });
 
-  // Custom banner photo (uploaded, unlike preset cosmetics) — stored in /uploads.
-  socket.on("user:setBanner", ({ image }, ack) => {
+  // Custom banner photo (uploaded, unlike preset cosmetics).
+  socket.on("user:setBanner", async ({ image }, ack) => {
     const u = refresh();
     if (!u) return ack?.({ error: "Not signed in" });
     if (image === null || image === "") {
       db.prepare("UPDATE users SET banner = NULL WHERE id = ?").run(u.id);
       return ack?.({ banner: null });
     }
-    const path = saveDataUrlImage(String(image));
+    const path = await saveDataUrlImage(String(image));
     if (!path) return ack?.({ error: "Image must be PNG/JPEG/WebP under 2 MB" });
     db.prepare("UPDATE users SET banner = ? WHERE id = ?").run(path, u.id);
     ack?.({ banner: path });
@@ -1374,7 +1385,7 @@ io.on("connection", (socket: Socket) => {
     ack?.({ items: allShopItems.all() });
   });
 
-  socket.on("admin:itemSave", ({ token, item }, ack) => {
+  socket.on("admin:itemSave", async ({ token, item }, ack) => {
     if (!isAdmin(token)) return ack?.({ error: "Not authorized" });
     const type = item?.type;
     const name = String(item?.name ?? "").trim().slice(0, 40);
@@ -1384,7 +1395,7 @@ io.on("connection", (socket: Socket) => {
     if (!Number.isFinite(price) || price < 0) return ack?.({ error: "Enter a valid price" });
     let src: string | null = item?.src ?? null;
     if (item?.image) {
-      const path = saveDataUrlImage(String(item.image));
+      const path = await saveDataUrlImage(String(item.image));
       if (!path) return ack?.({ error: "Image must be PNG/JPEG/WebP under 2 MB" });
       src = path;
     }
@@ -1488,6 +1499,8 @@ io.on("connection", (socket: Socket) => {
     });
   });
 });
+
+startSnapshotLoop(db);
 
 httpServer.listen(PORT, () => {
   console.log(`[sora] server listening on http://localhost:${PORT}`);

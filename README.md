@@ -43,6 +43,7 @@ Persistence is **SQLite** (`apps/server/sora.db`, auto-created). Zero installs l
 | `VITE_SERVER_URL` | web build (Netlify) | Socket.IO server origin; defaults to same-origin |
 | `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | web build | Supabase project URL + anon key (Settings → API) |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` | server | same project; used to verify user access tokens |
+| `SUPABASE_SERVICE_KEY` | server (secret!) | persists db snapshots + media uploads to Supabase Storage so data survives redeploys |
 | `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | server | party-room audio — LiveKit Cloud free tier, or self-host via [infra/livekit/](infra/livekit/README.md) |
 | `DB_PATH` | server | SQLite file location (default `sora.db`) |
 | `PORT` | server | default 3001 |
