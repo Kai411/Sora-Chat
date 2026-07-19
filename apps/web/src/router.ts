@@ -19,6 +19,7 @@ export const router = createRouter({
     { path: "/settings", component: () => import("./views/SettingsView.vue"), meta: { tabs: false } },
     { path: "/visits", component: () => import("./views/VisitsView.vue"), meta: { tabs: false } },
     { path: "/admin", component: () => import("./views/AdminView.vue"), meta: { tabs: false, public: true } },
+    { path: "/post/:id", component: () => import("./views/PostView.vue"), meta: { tabs: false } },
     { path: "/dms", component: () => import("./views/DmListView.vue") },
     { path: "/dms/:id", component: () => import("./views/DmChatView.vue"), meta: { tabs: false } },
     { path: "/random-chat", component: () => import("./views/RandomChatView.vue"), meta: { tabs: false } },

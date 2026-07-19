@@ -13,7 +13,13 @@ import type DatabaseType from "better-sqlite3";
 
 const DATA_BUCKET = "sora-data";
 const MEDIA_BUCKET = "sora-media";
-const DB_OBJECT = "sora.db";
+
+// Namespace so local dev and staging never share objects: Render sets the
+// RENDER env var on its platform, so hosted runs default to "prod" while a
+// laptop run defaults to "dev" — even with the same service key, a local test
+// db/upload can never clobber staging's. Override with DATA_NAMESPACE.
+const NS = process.env.DATA_NAMESPACE ?? (process.env.RENDER ? "prod" : "dev");
+const DB_OBJECT = `sora-${NS}.db`;
 
 let client: SupabaseClient | null = null;
 
@@ -45,11 +51,11 @@ export async function restoreSnapshot(dbPath: string) {
     await ensureBuckets(c);
     const { data, error } = await c.storage.from(DATA_BUCKET).download(DB_OBJECT);
     if (error || !data) {
-      console.log("[persist] no db snapshot in storage yet (fresh start)");
+      console.log(`[persist] no db snapshot in storage yet (fresh start, namespace "${NS}")`);
       return;
     }
     writeFileSync(dbPath, Buffer.from(await data.arrayBuffer()));
-    console.log("[persist] restored db snapshot from Supabase Storage");
+    console.log(`[persist] restored db snapshot from Supabase Storage (namespace "${NS}")`);
   } catch (e: any) {
     console.error("[persist] restore failed:", e?.message ?? e);
   }
@@ -90,20 +96,21 @@ export function startSnapshotLoop(db: DatabaseType.Database) {
   process.once("SIGTERM", onExit);
   process.once("SIGINT", onExit);
   void flush(db); // baseline right away
-  console.log("[persist] snapshot loop running (45s)");
+  console.log(`[persist] snapshot loop running (45s, namespace "${NS}")`);
 }
 
 /** Store a media file in the public bucket; returns its CDN URL, or null. */
 export async function uploadMedia(path: string, buf: Buffer, contentType: string): Promise<string | null> {
   const c = storage();
   if (!c) return null;
+  const nsPath = `${NS}/${path}`;
   try {
-    const { error } = await c.storage.from(MEDIA_BUCKET).upload(path, buf, { contentType, upsert: false });
+    const { error } = await c.storage.from(MEDIA_BUCKET).upload(nsPath, buf, { contentType, upsert: false });
     if (error) {
       console.error("[persist] media upload failed:", error.message);
       return null;
     }
-    return c.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+    return c.storage.from(MEDIA_BUCKET).getPublicUrl(nsPath).data.publicUrl;
   } catch (e: any) {
     console.error("[persist] media upload error:", e?.message ?? e);
     return null;

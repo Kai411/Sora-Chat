@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { socket } from "../lib/socket";
 import { useAppStore } from "../stores/app";
 import { pickImage } from "../lib/image";
 import PostCard from "../components/PostCard.vue";
-import CommentsSheet from "../components/CommentsSheet.vue";
 import type { Post } from "../types";
 
 const app = useAppStore();
+const router = useRouter();
 const tab = ref<"public" | "following">("public");
 const feed = ref<Post[]>([]);
 const draft = ref("");
@@ -15,7 +16,6 @@ const draftImage = ref<string | null>(null);
 const composing = ref(false);
 const posting = ref(false);
 const error = ref("");
-const commentsFor = ref<Post | null>(null);
 
 async function load() {
   feed.value = await socket.emitWithAck("feed:list", { tab: tab.value });
@@ -30,6 +30,10 @@ function onNew({ post }: { post: Post }) {
 function onCommented({ postId, comments }: { postId: number; comments: number }) {
   const p = feed.value.find((x) => x.id === postId);
   if (p) p.comments = comments;
+}
+
+function onRemoved({ postId }: { postId: number }) {
+  feed.value = feed.value.filter((p) => p.id !== postId);
 }
 
 async function attach() {
@@ -60,11 +64,13 @@ watch(tab, load);
 onMounted(() => {
   socket.on("feed:new", onNew);
   socket.on("feed:commented", onCommented);
+  socket.on("feed:removed", onRemoved);
   load();
 });
 onUnmounted(() => {
   socket.off("feed:new", onNew);
   socket.off("feed:commented", onCommented);
+  socket.off("feed:removed", onRemoved);
 });
 </script>
 
@@ -94,7 +100,7 @@ onUnmounted(() => {
         :key="p.id"
         :post="p"
         show-follow
-        @comments="commentsFor = $event"
+        @open="router.push(`/post/${$event.id}`)"
         @followed="onFollowed"
       />
     </div>
@@ -141,6 +147,5 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <CommentsSheet v-if="commentsFor" :post="commentsFor" @close="commentsFor = null" />
   </div>
 </template>

@@ -133,22 +133,4 @@ export function publicUser(u: UserRow) {
 export const getUserById = db.prepare<[number], UserRow>("SELECT * FROM users WHERE id = ?");
 export const getUserByEmail = db.prepare<[string], UserRow>("SELECT * FROM users WHERE email = ?");
 
-// Seed a handful of authors + posts so the feed isn't empty on first run.
-if ((db.prepare("SELECT COUNT(*) c FROM posts").get() as any).c === 0) {
-  const seedUser = db.prepare(
-    "INSERT INTO users (email, nickname, avatar, created) VALUES (?, ?, ?, ?) ON CONFLICT(email) DO NOTHING"
-  );
-  const seedPost = db.prepare("INSERT INTO posts (user_id, text, ts) VALUES (?, ?, ?)");
-  const seeds: [string, string, string, string][] = [
-    ["luna@seed.sora", "Luna", "🌙", "First night on Sora ✨ anyone up for a random call?"],
-    ["mochi@seed.sora", "Mochi", "🍡", "Pulled a Legendary on my third gacha... I'm never this lucky 🐉"],
-    ["kite@seed.sora", "Kite", "🪁", "Made a music room tonight, come through 🎵"],
-    ["nova@seed.sora", "Nova", "🌟", "Reminder: be kind to strangers, you might make a friend 💜"],
-  ];
-  const now = Date.now();
-  seeds.forEach(([email, nickname, avatar, text], i) => {
-    seedUser.run(email, nickname, avatar, now);
-    const u = getUserByEmail.get(email);
-    if (u) seedPost.run(u.id, text, now - (seeds.length - i) * 3600_000);
-  });
-}
+// No seeded content — the feed starts empty; real users fill it.

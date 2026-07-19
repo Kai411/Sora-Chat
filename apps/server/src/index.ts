@@ -1,9 +1,8 @@
 import "./env";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync, createReadStream, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, createReadStream } from "node:fs";
 import { basename, extname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { Server, type Socket } from "socket.io";
 import { AccessToken } from "livekit-server-sdk";
 import { db, getUserById, publicUser, type UserRow } from "./db";
@@ -247,21 +246,11 @@ const countComments = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FRO
 // you can drop in whichever format you have.
 const ALLOWED_AVATAR_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
-// Cosmetics shop — five categories, each backed by an image folder under
-// apps/web/public/<folder>. Files are scanned per request so drop-ins appear
-// without a restart. No custom uploads; bought with coins.
+// Cosmetics shop — five categories. The catalog lives entirely in the db and
+// is managed through the admin panel (/admin): it starts EMPTY, no folder
+// seeding, so staging only ever shows what an admin explicitly uploaded.
 type ShopType = "avatar" | "frame" | "background" | "bubble" | "pet";
 const SHOP_TYPES: ShopType[] = ["avatar", "frame", "background", "bubble", "pet"];
-const SHOP_FOLDER: Record<ShopType, string> = {
-  avatar: "avatars",
-  frame: "frames",
-  background: "backgrounds",
-  bubble: "bubbles",
-  pet: "pets",
-};
-const SHOP_DIR = Object.fromEntries(
-  SHOP_TYPES.map((t) => [t, fileURLToPath(new URL(`../../web/public/${SHOP_FOLDER[t]}`, import.meta.url))])
-) as Record<ShopType, string>;
 // which users column stores each equipped item
 const EQUIP_COL: Record<ShopType, "avatar" | "frame" | "profile_bg" | "bubble" | "pet"> = {
   avatar: "avatar",
@@ -272,15 +261,6 @@ const EQUIP_COL: Record<ShopType, "avatar" | "frame" | "profile_bg" | "bubble" |
 };
 const isShopType = (t: any): t is ShopType => SHOP_TYPES.includes(t);
 
-function priceFor(type: ShopType, i: number): number {
-  if (type === "avatar") return i < 4 ? 300 : i < 8 ? 600 : 1000;
-  if (type === "pet") return 1500 + i * 300;
-  return 500 + i * 200; // frame / background / bubble
-}
-
-// Shop items are stored in the DB and managed via the admin panel. On first
-// run the table is seeded from whatever preset images exist in the folders so
-// there's a starting catalog.
 interface ShopItem {
   id: number;
   type: ShopType;
@@ -292,32 +272,7 @@ const insertShopItem = db.prepare(
   "INSERT INTO shop_items (type, name, price, src, created) VALUES (?, ?, ?, ?, ?)"
 );
 const itemsByType = db.prepare<[string], ShopItem>("SELECT id, type, name, price, src FROM shop_items WHERE type = ? ORDER BY id");
-const itemBySrc = db.prepare<[string, string], ShopItem>("SELECT id, type, name, price, src FROM shop_items WHERE type = ? AND src = ?");
 const allShopItems = db.prepare<[], ShopItem>("SELECT id, type, name, price, src FROM shop_items ORDER BY type, id");
-
-function seedShopFromFolders() {
-  if ((db.prepare("SELECT COUNT(*) c FROM shop_items").get() as any).c > 0) return;
-  const seed = db.transaction(() => {
-    for (const type of SHOP_TYPES) {
-      let i = 0;
-      let files: string[] = [];
-      try {
-        files = readdirSync(SHOP_DIR[type]).sort();
-      } catch {
-        continue;
-      }
-      for (const file of files) {
-        const ext = extname(file).toLowerCase();
-        if (!ALLOWED_AVATAR_EXT.has(ext) || basename(file, ext) === "newbie") continue;
-        const label = `${type[0].toUpperCase()}${type.slice(1)} ${i + 1}`;
-        insertShopItem.run(type, label, priceFor(type, i), `/${SHOP_FOLDER[type]}/${file}`, Date.now());
-        i++;
-      }
-    }
-  });
-  seed();
-}
-seedShopFromFolders();
 
 function catalogFor(type: ShopType): { src: string; price: number; name: string }[] {
   return (itemsByType.all(type) as ShopItem[]).map((it) => ({ src: it.src, price: it.price, name: it.name }));
@@ -1222,6 +1177,26 @@ io.on("connection", (socket: Socket) => {
     else likeStmt.run(postId, user.id);
     const row: any = getPostRow.get({ viewer: user.id, id: postId });
     if (row) ack?.({ id: postId, likes: row.likes, liked: !!row.liked });
+  });
+
+  socket.on("feed:one", ({ id }, ack) => {
+    if (!user) return ack?.(null);
+    const row = getPostRow.get({ viewer: user.id, id: Number(id) });
+    ack?.(row ? serializeFeedRow(row, user.id) : null);
+  });
+
+  socket.on("feed:delete", ({ id }, ack) => {
+    if (!user) return ack?.({ error: "Not signed in" });
+    const pid = Number(id);
+    const row = db.prepare("SELECT user_id FROM posts WHERE id = ?").get(pid) as { user_id: number } | undefined;
+    if (!row || row.user_id !== user.id) return ack?.({ error: "You can only delete your own posts" });
+    db.transaction(() => {
+      db.prepare("DELETE FROM comments WHERE post_id = ?").run(pid);
+      db.prepare("DELETE FROM likes WHERE post_id = ?").run(pid);
+      db.prepare("DELETE FROM posts WHERE id = ?").run(pid);
+    })();
+    io.emit("feed:removed", { postId: pid });
+    ack?.({ ok: true });
   });
 
   socket.on("feed:comments", ({ postId }, ack) => {

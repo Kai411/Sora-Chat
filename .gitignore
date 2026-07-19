@@ -8,3 +8,18 @@ dist/
 .env.*
 !.env.example
 uploads/
+
+# Shop/cosmetic art is uploaded through the admin panel per environment —
+# local files must never deploy to staging. Only the newbie default avatar
+# (every new account's starting pfp) and the READMEs are tracked.
+apps/web/public/avatars/*
+!apps/web/public/avatars/README.md
+!apps/web/public/avatars/newbie.*
+apps/web/public/frames/*
+!apps/web/public/frames/README.md
+apps/web/public/backgrounds/*
+!apps/web/public/backgrounds/README.md
+apps/web/public/bubbles/*
+!apps/web/public/bubbles/README.md
+apps/web/public/pets/*
+!apps/web/public/pets/README.md

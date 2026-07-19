@@ -13,7 +13,6 @@ import { useAppStore } from "../stores/app";
 import { pickImage } from "../lib/image";
 import Avatar from "../components/Avatar.vue";
 import PostCard from "../components/PostCard.vue";
-import CommentsSheet from "../components/CommentsSheet.vue";
 import Icon from "../components/Icon.vue";
 import type { Post, Profile, PublicUser } from "../types";
 
@@ -23,7 +22,6 @@ const app = useAppStore();
 
 const profile = ref<Profile | null>(null);
 const posts = ref<Post[]>([]);
-const commentsFor = ref<Post | null>(null);
 const showVip = ref(false);
 const toast = ref("");
 const followSheet = ref<"followers" | "following" | null>(null);
@@ -321,7 +319,7 @@ onMounted(load);
             v-for="p in posts"
             :key="p.id"
             :post="p"
-            @comments="commentsFor = $event"
+            @open="router.push(`/post/${$event.id}`)"
           />
         </div>
       </section>
@@ -416,12 +414,6 @@ onMounted(load);
         </p>
       </div>
     </div>
-
-    <CommentsSheet
-      v-if="commentsFor"
-      :post="commentsFor"
-      @close="commentsFor = null"
-    />
 
     <div
       v-if="toast"
