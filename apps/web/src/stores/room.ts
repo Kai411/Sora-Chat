@@ -271,17 +271,19 @@ export const useRoomStore = defineStore("room", {
           method: "POST",
           headers: {
             authorization: `Bearer ${data.session.access_token}`,
-            "x-filename": file.name,
+            // header values must be Latin1 — encode so unicode filenames work
+            "x-filename": encodeURIComponent(file.name),
             "content-type": "application/octet-stream",
           },
           body: file,
         });
-        const body = await res.json();
-        if (body.error) return body.error;
+        const body = await res.json().catch(() => null);
+        if (!res.ok) return body?.error ?? `Upload failed (server said ${res.status})`;
+        if (!body) return "Upload failed — unexpected response";
         this.myTracks = [body, ...this.myTracks];
         return null;
       } catch {
-        return "Upload failed — check your connection";
+        return "Upload failed — the server may be waking up, try again in a moment";
       }
     },
     async deleteMusic(id: number) {

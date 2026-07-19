@@ -10,9 +10,11 @@ export default defineConfig({
   server: {
     proxy: {
       "/socket.io": { target: "http://localhost:3001", ws: true },
-      // Uploaded media (banners, admin shop images, feed photos) live on the
-      // API server; proxy them in dev like production's VITE_SERVER_URL does.
+      // Uploaded media (banners, admin shop images, feed photos) and the music
+      // upload endpoint live on the API server; proxy them in dev like
+      // production's VITE_SERVER_URL does.
       "/uploads": { target: "http://localhost:3001" },
+      "/music": { target: "http://localhost:3001" },
     },
   },
 });

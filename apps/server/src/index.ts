@@ -435,7 +435,12 @@ const httpServer = createServer((req, res) => {
       res.end(JSON.stringify({ error }));
     };
     const token = String(req.headers.authorization ?? "").replace(/^Bearer /, "");
-    const filename = String(req.headers["x-filename"] ?? "track");
+    let filename = "track";
+    try {
+      filename = decodeURIComponent(String(req.headers["x-filename"] ?? "track"));
+    } catch {
+      /* keep default */
+    }
     const ext = extname(filename).slice(1).toLowerCase();
     if (!AUDIO_TYPES[ext]) return fail(400, "Use MP3, M4A, AAC, OGG or WAV");
     const chunks: Buffer[] = [];
