@@ -336,13 +336,17 @@ const AUDIO_TYPES: Record<string, string> = {
 const ASSET_TYPES: Record<string, string> = { ...IMAGE_TYPES, ...AUDIO_TYPES };
 const MAX_MUSIC_BYTES = 15_000_000;
 
-const insertMusic = db.prepare("INSERT INTO music (user_id, name, src, created) VALUES (?, ?, ?, ?)");
+const nextMusicPosition = db.prepare<[number], { m: number | null }>(
+  "SELECT MAX(position) m FROM music WHERE user_id = ?"
+);
+const insertMusic = db.prepare("INSERT INTO music (user_id, name, src, position, created) VALUES (?, ?, ?, ?, ?)");
 const listMusic = db.prepare<[number], { id: number; name: string; src: string }>(
-  "SELECT id, name, src FROM music WHERE user_id = ? ORDER BY id DESC"
+  "SELECT id, name, src FROM music WHERE user_id = ? ORDER BY position, id"
 );
 const getMusic = db.prepare<[number], { id: number; user_id: number; name: string; src: string }>(
   "SELECT id, user_id, name, src FROM music WHERE id = ?"
 );
+const setMusicPosition = db.prepare("UPDATE music SET position = ? WHERE id = ? AND user_id = ?");
 const MAX_IMAGE_BYTES = 2_000_000;
 
 async function saveDataUrlImage(dataUrl: string): Promise<string | null> {
@@ -426,7 +430,8 @@ const httpServer = createServer((req, res) => {
         src = `/uploads/${file}`;
       }
       const name = basename(filename, extname(filename)).slice(0, 60) || "Track";
-      const info = insertMusic.run(auth.user.id, name, src, Date.now());
+      const nextPos = (nextMusicPosition.get(auth.user.id)?.m ?? -1) + 1;
+      const info = insertMusic.run(auth.user.id, name, src, nextPos, Date.now());
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ id: Number(info.lastInsertRowid), name, src }));
     });
@@ -523,6 +528,26 @@ function musicPayload(r: LiveRoom) {
 }
 function broadcastMusic(r: LiveRoom) {
   io.to(`room:${r.id}`).emit("room:music", musicPayload(r));
+}
+
+/** Starts a track playing in a room; shared by play / next / prev. */
+function beginTrack(r: LiveRoom, track: { id: number; name: string; src: string }, ownerId: number, ownerName: string) {
+  r.music = {
+    trackId: track.id,
+    src: track.src,
+    name: track.name,
+    ownerId,
+    ownerName,
+    playing: true,
+    startedAt: Date.now(),
+    offset: 0,
+  };
+  broadcastMusic(r);
+}
+
+/** The current music owner's library in playlist order (position, then id). */
+function musicQueue(r: LiveRoom) {
+  return r.music ? (listMusic.all(r.music.ownerId) as { id: number; name: string; src: string }[]) : [];
 }
 
 // System notice in the room chat (moderation actions, etc.).
@@ -992,11 +1017,30 @@ io.on("connection", (socket: Socket) => {
     const track = getMusic.get(Number(id));
     if (!track || track.user_id !== user.id) return ack?.({ error: "Not your track" });
     db.prepare("DELETE FROM music WHERE id = ?").run(track.id);
+    // If it was playing anywhere, don't leave the room pointing at a dead file.
+    for (const r of rooms.values()) {
+      if (r.music?.trackId === track.id) {
+        r.music = null;
+        broadcastMusic(r);
+      }
+    }
+    ack?.(listMusic.all(user.id));
+  });
+
+  socket.on("music:reorder", ({ ids }, ack) => {
+    if (!user) return ack?.({ error: "Not signed in" });
+    const idList = Array.isArray(ids) ? ids.map(Number) : [];
+    const owned = listMusic.all(user.id) as { id: number }[];
+    const ownedIds = new Set(owned.map((t) => t.id));
+    if (idList.length !== ownedIds.size || !idList.every((id) => ownedIds.has(id))) {
+      return ack?.({ error: "Track list doesn't match your library" });
+    }
+    db.transaction(() => idList.forEach((id, i) => setMusicPosition.run(i, id, user!.id)))();
     ack?.(listMusic.all(user.id));
   });
 
   // Anyone in the room can play their OWN uploaded track; the person who
-  // started it and host/admins can pause/resume/stop.
+  // started it and host/admins can pause/resume/stop/skip.
   const canControlMusic = (r: LiveRoom) => !!user && !!r.music && (r.music.ownerId === user.id || isStaff(r, user.id));
 
   socket.on("room:musicPlay", ({ roomId, id }, ack) => {
@@ -1006,18 +1050,8 @@ io.on("connection", (socket: Socket) => {
     if (track.user_id !== user.id) return ack?.({ error: "You can only play your own uploads" });
     if (!roomMembers(roomId).some((m: any) => m.id === user!.id)) return ack?.({ error: "Join the room first" });
     if (r.music && !canControlMusic(r)) return ack?.({ error: "Someone else's track is playing" });
-    r.music = {
-      trackId: track.id,
-      src: track.src,
-      name: track.name,
-      ownerId: user.id,
-      ownerName: user.nickname,
-      playing: true,
-      startedAt: Date.now(),
-      offset: 0,
-    };
+    beginTrack(r, track, user.id, user.nickname);
     systemMessage(r, `${user.nickname} started playing ♪ ${track.name}`);
-    broadcastMusic(r);
     ack?.({ ok: true });
   });
 
@@ -1042,6 +1076,51 @@ io.on("connection", (socket: Socket) => {
     if (!r?.music || !canControlMusic(r)) return;
     r.music = null;
     broadcastMusic(r);
+  });
+
+  // Seeking: drag the progress bar to a position (seconds). Keeps play state.
+  socket.on("room:musicSeek", ({ roomId, time }) => {
+    const r = rooms.get(roomId);
+    if (!r?.music || !canControlMusic(r)) return;
+    r.music.offset = Math.max(0, Number(time) || 0);
+    r.music.startedAt = Date.now();
+    broadcastMusic(r);
+  });
+
+  // Next/prev walk the current owner's library in playlist order, looping by
+  // default. `trackId` is the client's idea of what's currently playing —
+  // used as an idempotency guard so an auto-advance race (e.g. two devices
+  // both detecting "ended") only advances once.
+  socket.on("room:musicNext", ({ roomId, trackId }, ack) => {
+    const r = rooms.get(roomId);
+    if (!r?.music || !canControlMusic(r)) return ack?.({ error: "No permission" });
+    if (trackId !== undefined && Number(trackId) !== r.music.trackId) return ack?.({ ok: true }); // stale, already advanced
+    const queue = musicQueue(r);
+    if (!queue.length) {
+      r.music = null;
+      broadcastMusic(r);
+      return ack?.({ ok: true });
+    }
+    const idx = queue.findIndex((t) => t.id === r.music!.trackId);
+    const next = queue[(idx + 1 + queue.length) % queue.length];
+    beginTrack(r, next, r.music.ownerId, r.music.ownerName);
+    ack?.({ ok: true });
+  });
+
+  socket.on("room:musicPrev", ({ roomId, trackId }, ack) => {
+    const r = rooms.get(roomId);
+    if (!r?.music || !canControlMusic(r)) return ack?.({ error: "No permission" });
+    if (trackId !== undefined && Number(trackId) !== r.music.trackId) return ack?.({ ok: true });
+    const queue = musicQueue(r);
+    if (!queue.length) {
+      r.music = null;
+      broadcastMusic(r);
+      return ack?.({ ok: true });
+    }
+    const idx = queue.findIndex((t) => t.id === r.music!.trackId);
+    const prev = queue[(idx - 1 + queue.length) % queue.length];
+    beginTrack(r, prev, r.music.ownerId, r.music.ownerName);
+    ack?.({ ok: true });
   });
 
   // --- direct messages -------------------------------------------------------

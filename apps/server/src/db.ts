@@ -82,6 +82,7 @@ db.exec(`
     user_id INTEGER NOT NULL REFERENCES users(id),
     name TEXT NOT NULL,
     src TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
     created INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_music_user ON music (user_id);
@@ -108,7 +109,24 @@ for (const col of ["frame", "bubble", "pet", "profile_bg", "banner"]) {
     db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT`);
   } catch {}
 }
+try {
+  db.exec("ALTER TABLE music ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+} catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users (supabase_id)");
+
+// One-time cleanup: earlier builds seeded placeholder feed posts under
+// @seed.sora accounts. Remove any leftovers on existing databases (harmless
+// no-op once cleaned, including on fresh dbs with no seed accounts).
+try {
+  const seedUsers = db.prepare("SELECT id FROM users WHERE email LIKE '%@seed.sora'").all() as { id: number }[];
+  if (seedUsers.length) {
+    const ids = seedUsers.map((u) => u.id);
+    const ph = ids.map(() => "?").join(",");
+    db.prepare(`DELETE FROM likes WHERE post_id IN (SELECT id FROM posts WHERE user_id IN (${ph}))`).run(...ids);
+    db.prepare(`DELETE FROM comments WHERE post_id IN (SELECT id FROM posts WHERE user_id IN (${ph}))`).run(...ids);
+    db.prepare(`DELETE FROM posts WHERE user_id IN (${ph})`).run(...ids);
+  }
+} catch {}
 
 export interface UserRow {
   id: number;

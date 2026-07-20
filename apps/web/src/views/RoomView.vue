@@ -82,7 +82,35 @@ function pickTrack() {
 async function playTrack(id: number) {
   const err = await room.playTrack(id);
   if (err) flash(err);
+  showMusicLibrary.value = false;
 }
+const showMusicLibrary = ref(false);
+const seekPreview = ref<number | null>(null);
+
+function formatTime(s: number) {
+  if (!Number.isFinite(s) || s < 0) s = 0;
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+function onSeekInput(e: Event) {
+  seekPreview.value = Number((e.target as HTMLInputElement).value);
+}
+function onSeekChange(e: Event) {
+  const v = Number((e.target as HTMLInputElement).value);
+  seekPreview.value = null;
+  room.seekMusic(v);
+}
+async function moveTrack(index: number, dir: -1 | 1) {
+  const to = index + dir;
+  if (to < 0 || to >= room.myTracks.length) return;
+  const list = [...room.myTracks];
+  [list[index], list[to]] = [list[to], list[index]];
+  room.myTracks = list; // optimistic
+  const err = await room.reorderMusic(list.map((t) => t.id));
+  if (err) flash(err);
+}
+
 const ready = ref(false); // hides the "Joining room…" screen once audio settles
 let readyTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -688,51 +716,113 @@ onUnmounted(() => {
         >
           <!-- music player -->
           <div class="rounded-2xl border border-line bg-surface p-4">
-            <p class="flex items-center gap-2 text-sm font-semibold">♪ Music</p>
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-semibold">♪ Music</p>
+              <button
+                class="grid size-8 place-items-center rounded-full bg-surface-2 text-white/60"
+                title="Your music library"
+                @click="showMusicLibrary = true"
+              >
+                <Icon name="list" cls="size-4" />
+              </button>
+            </div>
 
             <div v-if="room.music" class="mt-3 rounded-xl bg-surface-2 p-3">
               <p class="truncate text-sm font-medium">{{ room.music.name }}</p>
-              <p class="text-[10px] text-white/40">
+              <!-- <p class="text-[10px] text-white/40">
                 played by {{ room.music.ownerName }}
-              </p>
-              <div class="mt-2.5 flex items-center gap-2">
+              </p> -->
+
+              <!-- progress -->
+              <div class="mt-2.5">
+                <input
+                  type="range"
+                  min="0"
+                  :max="room.musicDuration || 0"
+                  step="0.1"
+                  :value="seekPreview ?? room.musicPosition"
+                  class="h-1 w-full cursor-pointer accent-fuchsia-400 disabled:cursor-default disabled:accent-white/20"
+                  :disabled="!room.canControlMusic()"
+                  @input="onSeekInput"
+                  @change="onSeekChange"
+                />
+                <div
+                  class="mt-0.5 flex justify-between text-[9px] tabular-nums text-white/35"
+                >
+                  <span>{{
+                    formatTime(seekPreview ?? room.musicPosition)
+                  }}</span>
+                  <span>{{ formatTime(room.musicDuration) }}</span>
+                </div>
+              </div>
+
+              <!-- transport -->
+              <div class="mt-2 flex items-center justify-center relative">
                 <template v-if="room.canControlMusic()">
+                  <div class="flex items-center gap-3">
+                    <button
+                      class="grid size-8 place-items-center rounded-full bg-surface text-white/70"
+                      title="Previous"
+                      @click="room.prevTrack()"
+                    >
+                      <Icon name="prev" cls="size-4" />
+                    </button>
+                    <button
+                      class="grid size-10 place-items-center rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
+                      @click="
+                        room.music.playing
+                          ? room.pauseMusic()
+                          : room.resumeMusic()
+                      "
+                    >
+                      <Icon
+                        :name="room.music.playing ? 'pause' : 'play'"
+                        cls="size-4.5"
+                      />
+                    </button>
+                    <button
+                      class="grid size-8 place-items-center rounded-full bg-surface text-white/70"
+                      title="Next"
+                      @click="room.nextTrack()"
+                    >
+                      <Icon name="next" cls="size-4" />
+                    </button>
+                  </div>
+
                   <button
-                    class="rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-4 py-1.5 text-xs font-semibold"
-                    @click="
-                      room.music.playing
-                        ? room.pauseMusic()
-                        : room.resumeMusic()
-                    "
-                  >
-                    {{ room.music.playing ? "Pause" : "Resume" }}
-                  </button>
-                  <button
-                    class="rounded-full bg-surface px-4 py-1.5 text-xs text-red-300"
+                    class="grid size-8 place-items-center rounded-full bg-surface text-white/70 absolute right-0"
                     @click="room.stopMusic()"
                   >
-                    Stop
+                    <Icon name="x" cls="size-4" />
                   </button>
                 </template>
                 <span v-else class="text-[10px] text-white/40">{{
                   room.music.playing ? "Now playing" : "Paused"
                 }}</span>
-                <button
-                  v-if="room.musicBlocked"
-                  class="rounded-full bg-amber-400/15 px-3 py-1.5 text-xs font-semibold text-amber-300"
-                  @click="room.tapToHearMusic()"
-                >
-                  ▶ Tap to hear
-                </button>
               </div>
+              <button
+                v-if="room.musicBlocked"
+                class="mt-2 w-full rounded-full bg-amber-400/15 px-3 py-1.5 text-xs font-semibold text-amber-300"
+                @click="room.tapToHearMusic()"
+              >
+                ▶ Tap to hear
+              </button>
             </div>
             <p v-else class="mt-3 text-xs text-white/40">
-              Nothing playing — start one of your tracks below.
+              Nothing playing — open your library
+              <Icon name="list" cls="mx-0.5 inline size-3 align-[-2px]" /> to
+              start a track.
             </p>
 
             <!-- per-listener music volume (only affects your own ears) -->
             <div v-if="room.music" class="mt-3 flex items-center gap-2.5">
-              <span class="text-sm">{{ room.musicVolume === 0 ? "🔇" : room.musicVolume < 0.5 ? "🔉" : "🔊" }}</span>
+              <span class="text-sm">{{
+                room.musicVolume === 0
+                  ? "🔇"
+                  : room.musicVolume < 0.5
+                    ? "🔉"
+                    : "🔊"
+              }}</span>
               <input
                 type="range"
                 min="0"
@@ -740,54 +830,20 @@ onUnmounted(() => {
                 step="0.05"
                 :value="room.musicVolume"
                 class="h-1 min-w-0 flex-1 cursor-pointer accent-fuchsia-400"
-                @input="room.setMusicVolume(Number(($event.target as HTMLInputElement).value))"
+                @input="
+                  room.setMusicVolume(
+                    Number(($event.target as HTMLInputElement).value),
+                  )
+                "
               />
-              <span class="w-8 text-right text-[10px] tabular-nums text-white/40">{{ Math.round(room.musicVolume * 100) }}%</span>
-            </div>
-
-            <div class="mt-4 flex items-center justify-between">
-              <p class="text-xs font-semibold text-white/60">My tracks</p>
-              <button
-                class="rounded-full bg-surface-2 px-3 py-1.5 text-xs font-medium text-fuchsia-300 disabled:opacity-40"
-                :disabled="uploadingTrack"
-                @click="pickTrack"
+              <span
+                class="w-8 text-right text-[10px] tabular-nums text-white/40"
+                >{{ Math.round(room.musicVolume * 100) }}%</span
               >
-                {{ uploadingTrack ? "Uploading…" : "+ Upload" }}
-              </button>
             </div>
-            <p class="mt-1 text-[10px] text-white/30">
-              MP3 / M4A / AAC / OGG / WAV, up to 15 MB. Yours forever, playable
-              in any room.
-            </p>
-            <div class="mt-2 space-y-1.5">
-              <p
-                v-if="!room.myTracks.length"
-                class="py-3 text-center text-xs text-white/30"
-              >
-                No tracks yet
-              </p>
-              <div
-                v-for="t in room.myTracks"
-                :key="t.id"
-                class="flex items-center gap-2 rounded-xl bg-surface-2 px-3 py-2"
-              >
-                <span class="min-w-0 flex-1 truncate text-xs">{{
-                  t.name
-                }}</span>
-                <button
-                  class="rounded-full bg-emerald-500/15 px-3 py-1 text-[11px] font-semibold text-emerald-300"
-                  @click="playTrack(t.id)"
-                >
-                  Play
-                </button>
-                <button
-                  class="rounded-full bg-surface px-2 py-1 text-[11px] text-white/40"
-                  @click="room.deleteMusic(t.id)"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
+            <!-- <p class="mt-3 text-center text-[9px] text-white/25">
+              Playlist loops automatically
+            </p> -->
           </div>
 
           <!-- minigames placeholder -->
@@ -1001,6 +1057,90 @@ onUnmounted(() => {
             >
               <Icon name="logout" cls="size-4" /> Leave room
             </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- music library sheet: manage your own uploaded tracks -->
+      <div
+        v-if="showMusicLibrary"
+        class="absolute inset-0 z-30 flex flex-col justify-end bg-black/60"
+        @click.self="showMusicLibrary = false"
+      >
+        <div
+          class="flex h-[75%] flex-col rounded-t-3xl border-t border-line bg-bg"
+        >
+          <div class="flex items-center justify-between px-5 py-3">
+            <p class="text-sm font-semibold">My tracks</p>
+            <button class="text-white/40" @click="showMusicLibrary = false">
+              ✕
+            </button>
+          </div>
+          <div class="flex items-center justify-between px-5">
+            <p class="text-[10px] text-white/30">
+              MP3/M4A/AAC/OGG/WAV, up to 15 MB. Yours forever, in any room.
+            </p>
+            <button
+              class="ml-3 flex shrink-0 items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-medium text-fuchsia-300 disabled:opacity-40"
+              :disabled="uploadingTrack"
+              @click="pickTrack"
+            >
+              <Icon name="upload" cls="size-3.5" />{{
+                uploadingTrack ? "Uploading…" : "Upload"
+              }}
+            </button>
+          </div>
+          <div
+            class="mt-2 pt-2 flex-1 space-y-1.5 overflow-y-auto p-5 pt-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
+          >
+            <p
+              v-if="!room.myTracks.length"
+              class="py-6 text-center text-xs text-white/30"
+            >
+              No tracks yet
+            </p>
+            <div
+              v-for="(t, i) in room.myTracks"
+              :key="t.id"
+              class="flex items-center gap-1 rounded-xl bg-surface-2 px-2 py-1.5"
+              :class="
+                room.music?.trackId === t.id && 'ring-1 ring-fuchsia-400/60'
+              "
+            >
+              <div class="flex shrink-0 flex-col">
+                <button
+                  class="grid size-5 place-items-center text-white/40 disabled:opacity-20"
+                  :disabled="i === 0"
+                  @click="moveTrack(i, -1)"
+                >
+                  <Icon name="chevron-up" cls="size-3.5" />
+                </button>
+                <button
+                  class="grid size-5 place-items-center text-white/40 disabled:opacity-20"
+                  :disabled="i === room.myTracks.length - 1"
+                  @click="moveTrack(i, 1)"
+                >
+                  <Icon name="chevron-down" cls="size-3.5" />
+                </button>
+              </div>
+              <span class="min-w-0 flex-1 truncate px-1 text-xs">{{
+                t.name
+              }}</span>
+              <button
+                class="grid size-7 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-300"
+                title="Play in room"
+                @click="playTrack(t.id)"
+              >
+                <Icon name="play" cls="size-3.5" />
+              </button>
+              <button
+                class="grid size-7 shrink-0 place-items-center rounded-full bg-surface text-white/40"
+                title="Delete"
+                @click="room.deleteMusic(t.id)"
+              >
+                <Icon name="trash" cls="size-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       </div>

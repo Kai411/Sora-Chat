@@ -15,6 +15,7 @@ export const router = createRouter({
     { path: "/gacha/:id", component: () => import("./views/GachaBannerView.vue"), meta: { tabs: false } },
     { path: "/me", redirect: () => { const a = useAppStore(); return a.user ? `/u/${a.user.id}` : "/"; } },
     { path: "/u/:id", component: () => import("./views/UserProfileView.vue") },
+    { path: "/u/:id/follows", component: () => import("./views/FollowsView.vue"), meta: { tabs: false } },
     { path: "/shop", component: () => import("./views/ShopView.vue"), meta: { tabs: false } },
     { path: "/settings", component: () => import("./views/SettingsView.vue"), meta: { tabs: false } },
     { path: "/visits", component: () => import("./views/VisitsView.vue"), meta: { tabs: false } },

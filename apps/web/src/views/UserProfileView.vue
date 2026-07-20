@@ -24,11 +24,6 @@ const profile = ref<Profile | null>(null);
 const posts = ref<Post[]>([]);
 const showVip = ref(false);
 const toast = ref("");
-const followSheet = ref<"followers" | "following" | null>(null);
-const followLists = ref<{ followers: PublicUser[]; following: PublicUser[] }>({
-  followers: [],
-  following: [],
-});
 const visits = ref<{
   visitors: { user: PublicUser; ts: number }[];
   visited: { user: PublicUser; ts: number }[];
@@ -107,19 +102,6 @@ async function toggleFollow() {
   if (!res) return;
   profile.value.isFollowing = res.following;
   profile.value.followers += res.following ? 1 : -1;
-}
-
-async function openFollows(tab: "followers" | "following") {
-  const res = await socket.emitWithAck("user:follows", {
-    userId: userId.value,
-  });
-  if (res) followLists.value = res;
-  followSheet.value = tab;
-}
-
-function goUser(u: PublicUser) {
-  followSheet.value = null;
-  if (u.id !== userId.value) router.push(`/u/${u.id}`);
 }
 
 async function claimDaily() {
@@ -248,11 +230,11 @@ onMounted(load);
         </p>
 
         <div class="mt-4 flex gap-8 text-center">
-          <button @click="openFollows('followers')">
+          <button @click="router.push(`/u/${userId}/follows?tab=followers`)">
             <p class="font-bold">{{ profile.followers }}</p>
             <p class="text-[10px] text-white/40">followers</p>
           </button>
-          <button @click="openFollows('following')">
+          <button @click="router.push(`/u/${userId}/follows?tab=following`)">
             <p class="font-bold">{{ profile.following }}</p>
             <p class="text-[10px] text-white/40">following</p>
           </button>
@@ -323,49 +305,6 @@ onMounted(load);
           />
         </div>
       </section>
-    </div>
-
-    <!-- followers / following sheet -->
-    <div
-      v-if="followSheet"
-      class="absolute inset-0 z-20 flex flex-col justify-end bg-black/60"
-      @click.self="followSheet = null"
-    >
-      <div
-        class="flex max-h-[70%] flex-col rounded-t-3xl border-t border-line bg-bg"
-      >
-        <div class="flex items-center justify-between px-5 py-3">
-          <p class="text-sm font-semibold capitalize">{{ followSheet }}</p>
-          <button class="text-white/40" @click="followSheet = null">✕</button>
-        </div>
-        <div
-          class="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]"
-        >
-          <p
-            v-if="!followLists[followSheet].length"
-            class="py-6 text-center text-xs text-white/30"
-          >
-            Nobody here yet
-          </p>
-          <button
-            v-for="u in followLists[followSheet]"
-            :key="u.id"
-            class="flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left active:bg-surface"
-            @click="goUser(u)"
-          >
-            <Avatar
-              :avatar="u.avatar"
-              :name="u.nickname"
-              :user-id="u.id"
-              :frame="u.frame"
-              size-class="size-10 text-xl"
-            />
-            <span class="min-w-0 flex-1 truncate text-sm">{{
-              u.nickname
-            }}</span>
-          </button>
-        </div>
-      </div>
     </div>
 
     <!-- VIP details sheet -->
