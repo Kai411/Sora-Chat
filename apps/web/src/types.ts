@@ -123,6 +123,27 @@ export interface Profile {
   posts: number;
   isFollowing: boolean;
   followsYou: boolean;
+  hiddenFromThem: boolean;
+  watchingThem: boolean;
+  partyReminder: boolean;
+}
+
+export interface VisitEntry {
+  user: PublicUser;
+  ts: number;
+  count: number;
+  masked?: boolean;
+  hidden?: boolean;
+}
+
+export interface AppNotification {
+  id: number;
+  type: "visit" | "follow" | "party";
+  ts: number;
+  read: boolean;
+  actor: PublicUser | null;
+  roomId: string | null;
+  roomName: string | null;
 }
 
 export interface GachaBanner {

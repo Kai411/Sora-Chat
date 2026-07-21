@@ -104,6 +104,35 @@ async function toggleFollow() {
   profile.value.followers += res.following ? 1 : -1;
 }
 
+const showMenu = ref(false);
+
+async function toggleHideVisits() {
+  if (!profile.value) return;
+  const res = await socket.emitWithAck("visit:hide", { userId: userId.value, on: !profile.value.hiddenFromThem });
+  if (res?.error) return flash(res.error);
+  profile.value.hiddenFromThem = res.hidden;
+  flash(res.hidden ? "You're now invisible to them" : "They can see your visits again");
+  showMenu.value = false;
+}
+
+async function toggleWatchVisits() {
+  if (!profile.value) return;
+  const res = await socket.emitWithAck("visit:watch", { userId: userId.value, on: !profile.value.watchingThem });
+  if (res?.error) return flash(res.error);
+  profile.value.watchingThem = res.watching;
+  flash(res.watching ? "You'll be notified when they visit" : "Visit alerts off");
+  showMenu.value = false;
+}
+
+async function togglePartyReminder() {
+  if (!profile.value) return;
+  const res = await socket.emitWithAck("party:remind", { hostId: userId.value, on: !profile.value.partyReminder });
+  if (res?.error) return flash(res.error);
+  profile.value.partyReminder = res.reminder;
+  flash(res.reminder ? "We'll remind you when they open a room" : "Party reminder off");
+  showMenu.value = false;
+}
+
 async function claimDaily() {
   const res = await socket.emitWithAck("daily:claim");
   if (res?.error) return flash(res.error);
@@ -158,6 +187,42 @@ onMounted(load);
         <Icon name="image" cls="size-4" />
       </button>
       <div class="flex-1"></div>
+      <div v-if="!isSelf && profile" class="relative">
+        <button
+          class="grid size-8 place-items-center rounded-full bg-black/40 text-white/70 backdrop-blur-sm"
+          title="More"
+          @click="showMenu = !showMenu"
+        >
+          <Icon name="more" cls="size-4" />
+        </button>
+        <div
+          v-if="showMenu"
+          class="absolute right-0 top-10 z-20 w-60 rounded-xl border border-line bg-surface-2 p-1 shadow-xl"
+        >
+          <button
+            v-if="app.vip"
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-xs active:bg-surface"
+            @click="toggleHideVisits"
+          >
+            <Icon name="eye-off" cls="size-4 shrink-0 text-white/50" />
+            {{ profile.hiddenFromThem ? "Show my visits to them" : "Hide my visits from them" }}
+          </button>
+          <button
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-xs active:bg-surface"
+            @click="toggleWatchVisits"
+          >
+            <Icon name="bell" cls="size-4 shrink-0 text-white/50" />
+            {{ profile.watchingThem ? "Stop visit alerts" : "Notify me when they visit" }}
+          </button>
+          <button
+            class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-xs active:bg-surface"
+            @click="togglePartyReminder"
+          >
+            <Icon name="rooms" cls="size-4 shrink-0 text-white/50" />
+            {{ profile.partyReminder ? "Cancel room reminder" : "Remind me when they open a room" }}
+          </button>
+        </div>
+      </div>
       <div v-if="isSelf" class="flex items-center gap-2">
         <button
           v-if="!profile?.user.vip"

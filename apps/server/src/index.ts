@@ -297,9 +297,36 @@ function afterEquip(userId: number) {
   rebroadcastUserRooms(userId);
 }
 
-const recordVisit = db.prepare("INSERT OR REPLACE INTO visits (visitor, visited, ts) VALUES (?, ?, ?)");
-const listVisitors = db.prepare("SELECT visitor AS uid, ts FROM visits WHERE visited = ? ORDER BY ts DESC LIMIT 50");
-const listVisited = db.prepare("SELECT visited AS uid, ts FROM visits WHERE visitor = ? ORDER BY ts DESC LIMIT 50");
+const recordVisit = db.prepare(
+  `INSERT INTO visits (visitor, visited, ts, count) VALUES (?, ?, ?, 1)
+   ON CONFLICT(visitor, visited) DO UPDATE SET ts = excluded.ts, count = count + 1`
+);
+const listVisitors = db.prepare("SELECT visitor AS uid, ts, count FROM visits WHERE visited = ? ORDER BY ts DESC LIMIT 50");
+const listVisited = db.prepare("SELECT visited AS uid, ts, count FROM visits WHERE visitor = ? ORDER BY ts DESC LIMIT 50");
+
+// Per-user stealth / watch / party-reminder toggles.
+const setVisitHide = db.prepare("INSERT OR IGNORE INTO visit_hides (hider, hidden_from) VALUES (?, ?)");
+const delVisitHide = db.prepare("DELETE FROM visit_hides WHERE hider = ? AND hidden_from = ?");
+const hasVisitHide = db.prepare("SELECT 1 FROM visit_hides WHERE hider = ? AND hidden_from = ?");
+const setVisitWatch = db.prepare("INSERT OR IGNORE INTO visit_watch (watcher, watched) VALUES (?, ?)");
+const delVisitWatch = db.prepare("DELETE FROM visit_watch WHERE watcher = ? AND watched = ?");
+const hasVisitWatch = db.prepare("SELECT 1 FROM visit_watch WHERE watcher = ? AND watched = ?");
+const setPartyRemind = db.prepare("INSERT OR IGNORE INTO party_reminders (guest, host) VALUES (?, ?)");
+const delPartyRemind = db.prepare("DELETE FROM party_reminders WHERE guest = ? AND host = ?");
+const hasPartyRemind = db.prepare("SELECT 1 FROM party_reminders WHERE guest = ? AND host = ?");
+const listPartyGuests = db.prepare("SELECT guest FROM party_reminders WHERE host = ?");
+
+// Notifications.
+const insertNotification = db.prepare(
+  "INSERT INTO notifications (user_id, type, actor_id, room_id, ts, read) VALUES (?, ?, ?, ?, ?, 0)"
+);
+const listNotifications = db.prepare(
+  "SELECT id, type, actor_id, room_id, ts, read FROM notifications WHERE user_id = ? ORDER BY ts DESC LIMIT 60"
+);
+const unreadNotifications = db.prepare<[number], { c: number }>(
+  "SELECT COUNT(*) c FROM notifications WHERE user_id = ? AND read = 0"
+);
+const markNotificationsRead = db.prepare("UPDATE notifications SET read = 1 WHERE user_id = ?");
 const followerCount = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM follows WHERE followee = ?");
 const followingCount = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM follows WHERE follower = ?");
 const postCount = db.prepare<[number], { c: number }>("SELECT COUNT(*) c FROM posts WHERE user_id = ?");
@@ -444,6 +471,38 @@ const io = new Server(httpServer, { cors: { origin: true }, maxHttpBufferSize: 3
 
 function userSockets(userId: number): string[] {
   return [...online.entries()].filter(([, uid]) => uid === userId).map(([sid]) => sid);
+}
+
+/** Shape a stored notification row into a client payload (actor + room hydrated). */
+function hydrateNotification(row: { id: number; type: string; actor_id: number | null; room_id: string | null; ts: number; read: number }) {
+  const actor = row.actor_id ? getUserById.get(row.actor_id) : null;
+  const room = row.room_id ? rooms.get(row.room_id) : null;
+  return {
+    id: row.id,
+    type: row.type,
+    ts: row.ts,
+    read: !!row.read,
+    actor: actor ? publicUser(actor) : null,
+    roomId: row.room_id,
+    roomName: room?.name ?? null,
+  };
+}
+
+/** Persist a notification for `userId` and live-push it to their open sockets. */
+function notify(userId: number, n: { type: "visit" | "follow" | "party"; actorId?: number; roomId?: string }) {
+  const info = insertNotification.run(userId, n.type, n.actorId ?? null, n.roomId ?? null, Date.now());
+  const row = {
+    id: Number(info.lastInsertRowid),
+    type: n.type,
+    actor_id: n.actorId ?? null,
+    room_id: n.roomId ?? null,
+    ts: Date.now(),
+    read: 0,
+  };
+  const unread = unreadNotifications.get(userId)!.c;
+  for (const sid of userSockets(userId)) {
+    io.to(sid).emit("notify:new", { notification: hydrateNotification(row), unread });
+  }
 }
 
 function broadcastPresence() {
@@ -635,6 +694,7 @@ io.on("connection", (socket: Socket) => {
       coins: u.coins,
       vip: !!u.vip,
       inventory: listInventory.all(u.id),
+      unreadNotifications: unreadNotifications.get(u.id)!.c,
     });
   }
 
@@ -727,6 +787,10 @@ io.on("connection", (socket: Socket) => {
     };
     rooms.set(room.id, room);
     roomMessages.set(room.id, []);
+    // Ping anyone who set a party reminder on this host.
+    for (const { guest } of listPartyGuests.all(user.id) as { guest: number }[]) {
+      notify(guest, { type: "party", actorId: user.id, roomId: room.id });
+    }
     ack?.({ room: roomSummary(room) });
   });
 
@@ -1027,6 +1091,22 @@ io.on("connection", (socket: Socket) => {
     ack?.(listMusic.all(user.id));
   });
 
+  // Save the room's currently playing track into the caller's own library —
+  // links the same file (src) rather than re-uploading, so nothing is
+  // duplicated in storage.
+  socket.on("music:addFromRoom", ({ roomId }, ack) => {
+    if (!user) return ack?.({ error: "Not signed in" });
+    const r = rooms.get(roomId);
+    if (!r?.music) return ack?.({ error: "Nothing is playing" });
+    if (r.music.ownerId === user.id) return ack?.({ error: "Already in your library" });
+    if (!roomMembers(roomId).some((m: any) => m.id === user!.id)) return ack?.({ error: "Join the room first" });
+    const owned = listMusic.all(user.id) as { id: number; src: string }[];
+    if (owned.some((t) => t.src === r.music!.src)) return ack?.({ error: "Already in your playlist" });
+    const pos = (nextMusicPosition.get(user.id)?.m ?? -1) + 1;
+    insertMusic.run(user.id, r.music.name, r.music.src, pos, Date.now());
+    ack?.({ ok: true, list: listMusic.all(user.id) });
+  });
+
   socket.on("music:reorder", ({ ids }, ack) => {
     if (!user) return ack?.({ error: "Not signed in" });
     const idList = Array.isArray(ids) ? ids.map(Number) : [];
@@ -1308,7 +1388,11 @@ io.on("connection", (socket: Socket) => {
   socket.on("user:profile", ({ userId }, ack) => {
     const target = getUserById.get(Number(userId));
     if (!user || !target) return ack?.(null);
-    if (target.id !== user.id) recordVisit.run(user.id, target.id, Date.now());
+    if (target.id !== user.id) {
+      recordVisit.run(user.id, target.id, Date.now());
+      // If the target is watching this visitor, ping them.
+      if (hasVisitWatch.get(target.id, user.id)) notify(target.id, { type: "visit", actorId: user.id });
+    }
     ack?.({
       user: publicUser(target),
       background: target.profile_bg ?? null,
@@ -1318,6 +1402,10 @@ io.on("connection", (socket: Socket) => {
       posts: postCount.get(target.id)!.c,
       isFollowing: !!hasFollow.get(user.id, target.id),
       followsYou: !!hasFollow.get(target.id, user.id),
+      // Viewer-relative toggle states (for the profile three-dots menu).
+      hiddenFromThem: !!hasVisitHide.get(user.id, target.id),
+      watchingThem: !!hasVisitWatch.get(user.id, target.id),
+      partyReminder: !!hasPartyRemind.get(user.id, target.id),
     });
   });
 
@@ -1359,17 +1447,77 @@ io.on("connection", (socket: Socket) => {
 
   socket.on("user:visits", (ack) => {
     if (!user) return ack?.(null);
-    const hydrate = (rows: any[]) =>
-      rows
-        .map((r) => {
-          const u = getUserById.get(r.uid);
-          return u ? { user: publicUser(u), ts: r.ts } : null;
-        })
-        .filter(Boolean);
+    const meId = user.id;
+    const iAmVip = !!getUserById.get(meId)?.vip;
+    // "Visited me": drop anyone who's gone incognito for me; mask identities
+    // for non-VIP viewers (real data never leaves the server for them).
+    const visitorRows = (listVisitors.all(meId) as any[]).filter((r) => !hasVisitHide.get(r.uid, meId));
+    const visitors = visitorRows
+      .map((r) => {
+        const u = getUserById.get(r.uid);
+        if (!u) return null;
+        if (!iAmVip) {
+          return { user: { id: 0, nickname: "", avatar: "/avatars/newbie.png", vip: false }, ts: r.ts, count: r.count, masked: true };
+        }
+        return { user: publicUser(u), ts: r.ts, count: r.count };
+      })
+      .filter(Boolean);
+    // "I visited": always my own real data.
+    const visited = (listVisited.all(meId) as any[])
+      .map((r) => {
+        const u = getUserById.get(r.uid);
+        return u ? { user: publicUser(u), ts: r.ts, count: r.count, hidden: !!hasVisitHide.get(meId, r.uid) } : null;
+      })
+      .filter(Boolean);
+    ack?.({ visitors, visited, vip: iAmVip });
+  });
+
+  // VIP goes incognito for a specific person (or reveals themselves again).
+  socket.on("visit:hide", ({ userId, on }, ack) => {
+    const u = refresh();
+    if (!u) return ack?.({ error: "Not signed in" });
+    if (!u.vip) return ack?.({ error: "VIP only" });
+    const target = Number(userId);
+    if (!target || target === u.id) return ack?.({ error: "Invalid user" });
+    if (on) setVisitHide.run(u.id, target);
+    else delVisitHide.run(u.id, target);
+    ack?.({ hidden: !!hasVisitHide.get(u.id, target) });
+  });
+
+  // Any user: get pinged when this person visits my profile.
+  socket.on("visit:watch", ({ userId, on }, ack) => {
+    if (!user) return ack?.({ error: "Not signed in" });
+    const me = user.id;
+    const target = Number(userId);
+    if (!target || target === me) return ack?.({ error: "Invalid user" });
+    if (on) setVisitWatch.run(me, target);
+    else delVisitWatch.run(me, target);
+    ack?.({ watching: !!hasVisitWatch.get(me, target) });
+  });
+
+  // Any user: get pinged when this host opens a party room.
+  socket.on("party:remind", ({ hostId, on }, ack) => {
+    if (!user) return ack?.({ error: "Not signed in" });
+    const me = user.id;
+    const host = Number(hostId);
+    if (!host || host === me) return ack?.({ error: "Invalid user" });
+    if (on) setPartyRemind.run(me, host);
+    else delPartyRemind.run(me, host);
+    ack?.({ reminder: !!hasPartyRemind.get(me, host) });
+  });
+
+  socket.on("notifications:list", (ack) => {
+    if (!user) return ack?.({ notifications: [], unread: 0 });
     ack?.({
-      visitors: hydrate(listVisitors.all(user.id) as any[]),
-      visited: hydrate(listVisited.all(user.id) as any[]),
+      notifications: (listNotifications.all(user.id) as any[]).map(hydrateNotification),
+      unread: unreadNotifications.get(user.id)!.c,
     });
+  });
+
+  socket.on("notifications:read", (ack) => {
+    if (!user) return ack?.({ unread: 0 });
+    markNotificationsRead.run(user.id);
+    ack?.({ unread: 0 });
   });
 
   // --- cosmetics shop (avatar / frame / background / bubble / pet) ------------
@@ -1473,7 +1621,10 @@ io.on("connection", (socket: Socket) => {
     const target = getUserById.get(Number(userId));
     if (!user || !target || target.id === user.id) return;
     if (hasFollow.get(user.id, target.id)) unfollowStmt.run(user.id, target.id);
-    else followStmt.run(user.id, target.id);
+    else {
+      followStmt.run(user.id, target.id);
+      notify(target.id, { type: "follow", actorId: user.id });
+    }
     ack?.({ userId: target.id, following: !!hasFollow.get(user.id, target.id) });
   });
 

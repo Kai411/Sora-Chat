@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { socket } from "../lib/socket";
 import { supabase } from "../lib/supabase";
-import type { GachaItem, PublicUser } from "../types";
+import type { AppNotification, GachaItem, PublicUser } from "../types";
 
 export const useAppStore = defineStore("app", {
   state: () => ({
@@ -11,6 +11,8 @@ export const useAppStore = defineStore("app", {
     inventory: [] as GachaItem[],
     online: [] as PublicUser[],
     connected: false,
+    notifications: [] as AppNotification[],
+    unreadNotifications: 0,
   }),
   getters: {
     others(state): PublicUser[] {
@@ -26,6 +28,10 @@ export const useAppStore = defineStore("app", {
         if (this.user) this.socketAuth().catch(() => {});
       });
       socket.on("disconnect", () => (this.connected = false));
+      socket.on("notify:new", (p: { notification: AppNotification; unread: number }) => {
+        this.notifications.unshift(p.notification);
+        this.unreadNotifications = p.unread;
+      });
     },
     /**
      * Exchange the current Supabase session for a socket identity: the server
@@ -47,6 +53,17 @@ export const useAppStore = defineStore("app", {
       this.coins = res.coins;
       this.vip = res.vip;
       this.inventory = res.inventory;
+      this.unreadNotifications = res.unreadNotifications ?? 0;
+    },
+    async loadNotifications() {
+      const res = await socket.emitWithAck("notifications:list");
+      this.notifications = res?.notifications ?? [];
+      this.unreadNotifications = res?.unread ?? 0;
+    },
+    async markNotificationsRead() {
+      await socket.emitWithAck("notifications:read").catch(() => {});
+      this.unreadNotifications = 0;
+      this.notifications = this.notifications.map((n) => ({ ...n, read: true }));
     },
     /** Returns "confirm" when Supabase requires email confirmation first. */
     async signUp(input: { email: string; password: string; nickname: string }) {
@@ -54,17 +71,38 @@ export const useAppStore = defineStore("app", {
       const { data, error } = await supabase.auth.signUp({
         email: input.email,
         password: input.password,
-        options: { data: { nickname: input.nickname } },
+        options: {
+          data: { nickname: input.nickname },
+          // Send the confirmation link back to wherever signup happened
+          // (localhost in dev, the real site in prod) instead of always the
+          // dashboard's Site URL.
+          emailRedirectTo: window.location.origin,
+        },
       });
       if (error) throw new Error(error.message);
       if (!data.session) return "confirm" as const;
       await this.socketAuth({ nickname: input.nickname });
       return "ok" as const;
     },
+    /** Re-sends the signup confirmation email (e.g. the first one was lost). */
+    async resendConfirmation(email: string) {
+      if (!supabase) throw new Error("Supabase isn't configured");
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email,
+        options: { emailRedirectTo: window.location.origin },
+      });
+      if (error) throw new Error(error.message);
+    },
     async signIn(input: { email: string; password: string }) {
       if (!supabase) throw new Error("Supabase isn't configured");
       const { error } = await supabase.auth.signInWithPassword(input);
-      if (error) throw new Error(error.message);
+      if (error) {
+        // Surface this distinctly so the UI can offer "resend the email"
+        // instead of just a dead-end error.
+        if (/confirm/i.test(error.message)) throw new Error("EMAIL_NOT_CONFIRMED");
+        throw new Error(error.message);
+      }
       await this.socketAuth();
     },
     /** Redirects to Google; the session comes back via onAuthStateChange. */

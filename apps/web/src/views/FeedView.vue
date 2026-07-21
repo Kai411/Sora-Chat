@@ -5,6 +5,7 @@ import { socket } from "../lib/socket";
 import { useAppStore } from "../stores/app";
 import { pickImage } from "../lib/image";
 import PostCard from "../components/PostCard.vue";
+import Icon from "../components/Icon.vue";
 import type { Post } from "../types";
 
 const app = useAppStore();
@@ -78,15 +79,29 @@ onUnmounted(() => {
   <div class="relative flex flex-col">
     <header class="flex items-center justify-between px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-3">
       <h1 class="text-xl font-bold">Feed</h1>
-      <div class="flex rounded-full bg-surface p-1 text-xs">
+      <div class="flex items-center gap-2.5">
+        <div class="flex rounded-full bg-surface p-1 text-xs">
+          <button
+            v-for="t in ['public', 'following'] as const"
+            :key="t"
+            class="rounded-full px-3 py-1 capitalize text-white/50"
+            :class="tab === t && 'bg-surface-2 !text-white'"
+            @click="tab = t"
+          >
+            {{ t }}
+          </button>
+        </div>
         <button
-          v-for="t in ['public', 'following'] as const"
-          :key="t"
-          class="rounded-full px-3 py-1 capitalize text-white/50"
-          :class="tab === t && 'bg-surface-2 !text-white'"
-          @click="tab = t"
+          class="relative grid size-9 place-items-center rounded-full bg-surface text-white/70"
+          title="Notifications"
+          @click="router.push('/notifications')"
         >
-          {{ t }}
+          <Icon name="bell" cls="size-4.5" />
+          <span
+            v-if="app.unreadNotifications"
+            class="absolute -right-0.5 -top-0.5 grid min-w-4 place-items-center rounded-full bg-fuchsia-500 px-1 text-[9px] font-bold leading-4"
+            >{{ app.unreadNotifications > 9 ? "9+" : app.unreadNotifications }}</span
+          >
         </button>
       </div>
     </header>

@@ -86,6 +86,10 @@ async function playTrack(id: number) {
 }
 const showMusicLibrary = ref(false);
 const seekPreview = ref<number | null>(null);
+async function addToPlaylist() {
+  const err = await room.addCurrentToPlaylist();
+  flash(err ?? "Added to your playlist ♪");
+}
 
 function formatTime(s: number) {
   if (!Number.isFinite(s) || s < 0) s = 0;
@@ -219,6 +223,24 @@ function tapSeat(i: number) {
 function openCard(u: PublicUser) {
   showMembers.value = false;
   card.value = u;
+}
+
+function openChatProfile(m: {
+  userId: number;
+  author: string;
+  avatar: string;
+  frame?: string | null;
+}) {
+  const known = room.members.find((u) => u.id === m.userId);
+  openCard(
+    known ?? {
+      id: m.userId,
+      nickname: m.author,
+      avatar: m.avatar,
+      vip: false,
+      frame: m.frame ?? null,
+    },
+  );
 }
 
 function startInvite(userId: number) {
@@ -510,29 +532,6 @@ onUnmounted(() => {
             </div>
 
             <div class="mt-1.5 flex items-center justify-between">
-              <p
-                class="flex items-center gap-1 text-[9px]"
-                :class="
-                  room.audio === 'on' ? 'text-emerald-300/70' : 'text-white/25'
-                "
-              >
-                <span
-                  class="size-1.5 rounded-full"
-                  :class="{
-                    'bg-emerald-400': room.audio === 'on',
-                    'animate-pulse bg-amber-400': room.audio === 'connecting',
-                    'bg-white/20':
-                      room.audio === 'off' || room.audio === 'unavailable',
-                  }"
-                ></span>
-                {{
-                  room.audio === "on"
-                    ? "Audio connected"
-                    : room.audio === "connecting"
-                      ? "Connecting audio…"
-                      : "Audio not set up yet"
-                }}
-              </p>
               <button
                 v-if="!mySeat && room.myRequestSeat !== null"
                 class="rounded-full bg-surface-2 px-2.5 py-1 text-[10px] text-amber-300"
@@ -598,14 +597,16 @@ onUnmounted(() => {
                 {{ m.text }}
               </p>
               <div v-else class="flex items-start gap-2.5">
-                <Avatar
-                  :avatar="m.avatar"
-                  :name="m.author"
-                  :user-id="m.userId"
-                  :frame="m.frame"
-                  size-class="size-8 text-xs"
-                  fallback="initial"
-                />
+                <button class="shrink-0" @click="openChatProfile(m)">
+                  <Avatar
+                    :avatar="m.avatar"
+                    :name="m.author"
+                    :user-id="m.userId"
+                    :frame="m.frame"
+                    size-class="size-8 text-xs"
+                    fallback="initial"
+                  />
+                </button>
                 <div class="min-w-0 flex-1">
                   <p
                     class="text-[10px]"
@@ -728,7 +729,19 @@ onUnmounted(() => {
             </div>
 
             <div v-if="room.music" class="mt-3 rounded-xl bg-surface-2 p-3">
-              <p class="truncate text-sm font-medium">{{ room.music.name }}</p>
+              <div class="flex items-center justify-between gap-2">
+                <p class="min-w-0 flex-1 truncate text-sm font-medium">
+                  {{ room.music.name }}
+                </p>
+                <button
+                  v-if="room.music.ownerId !== app.user?.id"
+                  class="grid size-7 shrink-0 place-items-center rounded-full bg-surface text-white/60"
+                  title="Add to my playlist"
+                  @click="addToPlaylist"
+                >
+                  <Icon name="plus" cls="size-3.5" />
+                </button>
+              </div>
               <!-- <p class="text-[10px] text-white/40">
                 played by {{ room.music.ownerName }}
               </p> -->
@@ -860,8 +873,29 @@ onUnmounted(() => {
 
       <!-- page dots -->
       <div
-        class="flex items-center justify-center gap-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+        class="flex items-center justify-center gap-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] relative"
       >
+        <p
+          class="flex items-center gap-1 text-[9px] absolute left-4"
+          :class="room.audio === 'on' ? 'text-emerald-300/70' : 'text-white/25'"
+        >
+          <span
+            class="size-1.5 rounded-full"
+            :class="{
+              'bg-emerald-400': room.audio === 'on',
+              'animate-pulse bg-amber-400': room.audio === 'connecting',
+              'bg-white/20':
+                room.audio === 'off' || room.audio === 'unavailable',
+            }"
+          ></span>
+          {{
+            room.audio === "on"
+              ? "Audio connected"
+              : room.audio === "connecting"
+                ? "Connecting audio…"
+                : "Audio not set up yet"
+          }}
+        </p>
         <button
           v-for="p in 2"
           :key="p"

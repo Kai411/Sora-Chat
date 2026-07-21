@@ -64,8 +64,37 @@ db.exec(`
     visitor INTEGER NOT NULL REFERENCES users(id),
     visited INTEGER NOT NULL REFERENCES users(id),
     ts INTEGER NOT NULL,
+    count INTEGER NOT NULL DEFAULT 1,
     PRIMARY KEY (visitor, visited)
   );
+  -- VIP goes incognito for a specific person: hider is hidden from hidden_from's visitor list.
+  CREATE TABLE IF NOT EXISTS visit_hides (
+    hider INTEGER NOT NULL REFERENCES users(id),
+    hidden_from INTEGER NOT NULL REFERENCES users(id),
+    PRIMARY KEY (hider, hidden_from)
+  );
+  -- watcher is notified when watched visits watcher's profile.
+  CREATE TABLE IF NOT EXISTS visit_watch (
+    watcher INTEGER NOT NULL REFERENCES users(id),
+    watched INTEGER NOT NULL REFERENCES users(id),
+    PRIMARY KEY (watcher, watched)
+  );
+  -- guest is notified when host opens a party room.
+  CREATE TABLE IF NOT EXISTS party_reminders (
+    guest INTEGER NOT NULL REFERENCES users(id),
+    host INTEGER NOT NULL REFERENCES users(id),
+    PRIMARY KEY (guest, host)
+  );
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    type TEXT NOT NULL,
+    actor_id INTEGER,
+    room_id TEXT,
+    ts INTEGER NOT NULL,
+    read INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications (user_id, ts);
   CREATE TABLE IF NOT EXISTS avatar_owned (
     user_id INTEGER NOT NULL REFERENCES users(id),
     avatar_id TEXT NOT NULL,
@@ -111,6 +140,9 @@ for (const col of ["frame", "bubble", "pet", "profile_bg", "banner"]) {
 }
 try {
   db.exec("ALTER TABLE music ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+} catch {}
+try {
+  db.exec("ALTER TABLE visits ADD COLUMN count INTEGER NOT NULL DEFAULT 1");
 } catch {}
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_supabase ON users (supabase_id)");
 

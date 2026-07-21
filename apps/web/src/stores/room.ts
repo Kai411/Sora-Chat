@@ -17,6 +17,11 @@ function ensureMusicEl(store: any): HTMLAudioElement {
   if (!musicEl) {
     musicEl = new Audio();
     musicEl.preload = "auto";
+    // Required before the src is ever set: Supabase Storage serves music
+    // cross-origin, and Web Audio processing (below) silently produces no
+    // sound from an unmarked cross-origin element even when the response has
+    // permissive CORS headers.
+    musicEl.crossOrigin = "anonymous";
   }
   if (!musicListenersBound) {
     musicListenersBound = true;
@@ -30,6 +35,42 @@ function ensureMusicEl(store: any): HTMLAudioElement {
     });
   }
   return musicEl;
+}
+
+// Music volume on iOS: <audio>.volume is a documented WebKit no-op — only the
+// hardware buttons control media volume there, so the slider "works" on
+// desktop and silently does nothing on iPhone. Routing through a Web Audio
+// GainNode sidesteps that (iOS does respect gain). Kept as its own
+// AudioContext, entirely separate from the LiveKit voice-boost graph, so
+// disconnecting/reconnecting voice can never affect music playback.
+let musicCtx: AudioContext | null = null;
+let musicGain: GainNode | null = null;
+let musicSource: MediaElementAudioSourceNode | null = null;
+
+function applyMusicVolume(el: HTMLAudioElement, volume: number) {
+  el.volume = volume; // native fallback path; harmless where it's a no-op
+  try {
+    if (!musicCtx) {
+      const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
+      musicCtx = new Ctx();
+    }
+    if (!musicSource) {
+      // Can only be created once per element — cache it for the element's
+      // lifetime (it's a module-level singleton, so this runs once ever).
+      musicSource = musicCtx.createMediaElementSource(el);
+      musicGain = musicCtx.createGain();
+      musicSource.connect(musicGain).connect(musicCtx.destination);
+    }
+    musicGain!.gain.value = volume;
+    // Only silence the native element (handing output to the gain node) once
+    // the context is confirmed running; while suspended, leave it audible at
+    // its native volume so sound isn't lost to a blocked AudioContext.
+    const sync = () => (el.muted = musicCtx!.state === "running");
+    musicCtx.resume().then(sync).catch(() => {});
+    sync();
+  } catch {
+    // Web Audio unavailable — native volume above is already applied.
+  }
 }
 
 export type RoomAudioStatus = "off" | "connecting" | "on" | "unavailable";
@@ -260,7 +301,7 @@ export const useRoomStore = defineStore("room", {
         el.src = src;
         this.musicDuration = 0;
       }
-      el.volume = this.musicVolume;
+      applyMusicVolume(el, this.musicVolume);
       const position = m.offset + (m.playing ? (Date.now() + this.musicClockSkew - m.startedAt) / 1000 : 0);
       if (Math.abs(el.currentTime - position) > 1.5) el.currentTime = Math.max(0, position);
       if (m.playing) {
@@ -279,7 +320,7 @@ export const useRoomStore = defineStore("room", {
     /** Per-listener music volume (0–1), remembered across rooms. */
     setMusicVolume(v: number) {
       this.musicVolume = Math.min(1, Math.max(0, v));
-      if (musicEl) musicEl.volume = this.musicVolume;
+      if (musicEl) applyMusicVolume(musicEl, this.musicVolume);
       localStorage.setItem("sora:musicVol", String(this.musicVolume));
     },
     stopMusicLocal() {
@@ -324,6 +365,13 @@ export const useRoomStore = defineStore("room", {
       const res = await socket.emitWithAck("music:reorder", { ids });
       if (Array.isArray(res)) this.myTracks = res;
       return Array.isArray(res) ? null : (res?.error ?? "Reorder failed");
+    },
+    /** Link the currently playing track into my own library (no re-upload). */
+    async addCurrentToPlaylist(): Promise<string | null> {
+      if (!this.room) return null;
+      const res = await socket.emitWithAck("music:addFromRoom", { roomId: this.room.id });
+      if (Array.isArray(res?.list)) this.myTracks = res.list;
+      return res?.error ?? null;
     },
     async playTrack(id: number): Promise<string | null> {
       if (!this.room) return null;

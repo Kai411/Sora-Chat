@@ -19,6 +19,7 @@ export const router = createRouter({
     { path: "/shop", component: () => import("./views/ShopView.vue"), meta: { tabs: false } },
     { path: "/settings", component: () => import("./views/SettingsView.vue"), meta: { tabs: false } },
     { path: "/visits", component: () => import("./views/VisitsView.vue"), meta: { tabs: false } },
+    { path: "/notifications", component: () => import("./views/NotificationsView.vue"), meta: { tabs: false } },
     { path: "/admin", component: () => import("./views/AdminView.vue"), meta: { tabs: false, public: true } },
     { path: "/post/:id", component: () => import("./views/PostView.vue"), meta: { tabs: false } },
     { path: "/dms", component: () => import("./views/DmListView.vue") },

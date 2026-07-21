@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
 import { useAppStore } from "../stores/app";
@@ -16,6 +16,45 @@ const busy = ref(false);
 const error = ref("");
 const notice = ref("");
 
+// Set once we know this address needs to click a confirmation link — either
+// right after signing up, or because sign-in was blocked on it.
+const pendingConfirm = ref<string | null>(null);
+const resendCooldown = ref(0);
+let cooldownTimer: ReturnType<typeof setInterval> | null = null;
+
+function startCooldown() {
+  resendCooldown.value = 30;
+  cooldownTimer = setInterval(() => {
+    resendCooldown.value--;
+    if (resendCooldown.value <= 0 && cooldownTimer) {
+      clearInterval(cooldownTimer);
+      cooldownTimer = null;
+    }
+  }, 1000);
+}
+onUnmounted(() => {
+  if (cooldownTimer) clearInterval(cooldownTimer);
+});
+
+async function resend() {
+  if (!pendingConfirm.value || resendCooldown.value > 0) return;
+  error.value = "";
+  notice.value = "";
+  try {
+    await app.resendConfirmation(pendingConfirm.value);
+    notice.value = "Confirmation email sent again — check your inbox (and spam folder).";
+    startCooldown();
+  } catch (e: any) {
+    error.value = e?.message ?? "Could not resend the email";
+  }
+}
+
+function useDifferentEmail() {
+  pendingConfirm.value = null;
+  notice.value = "";
+  error.value = "";
+}
+
 async function submit() {
   if (busy.value) return;
   busy.value = true;
@@ -29,7 +68,7 @@ async function submit() {
         nickname: nickname.value.trim(),
       });
       if (result === "confirm") {
-        notice.value = "Almost there — check your inbox and confirm your email, then come back and sign in.";
+        pendingConfirm.value = email.value;
         return;
       }
     } else {
@@ -37,7 +76,12 @@ async function submit() {
     }
     router.replace("/");
   } catch (e: any) {
-    error.value = e?.message ?? "Something went wrong";
+    if (e?.message === "EMAIL_NOT_CONFIRMED") {
+      pendingConfirm.value = email.value;
+      error.value = "Please confirm your email before signing in.";
+    } else {
+      error.value = e?.message ?? "Something went wrong";
+    }
   } finally {
     busy.value = false;
   }
@@ -85,6 +129,31 @@ async function forgot() {
       (see <code>apps/web/.env.example</code>), then restart the dev server.
     </div>
 
+    <!-- confirmation pending: fresh signup, waiting on the email link -->
+    <div v-else-if="pendingConfirm && mode === 'signup'" class="w-full space-y-4 text-center">
+      <div class="text-5xl">📬</div>
+      <div>
+        <p class="text-sm font-semibold">Check your inbox</p>
+        <p class="mt-1 text-xs text-white/50">
+          We sent a confirmation link to <span class="text-white/80">{{ pendingConfirm }}</span
+          >. Click it, then come back here and sign in.
+        </p>
+      </div>
+      <button
+        class="w-full rounded-xl bg-surface py-3 text-sm font-medium text-fuchsia-300 disabled:opacity-40"
+        :disabled="resendCooldown > 0"
+        @click="resend"
+      >
+        {{ resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend confirmation email" }}
+      </button>
+      <button class="w-full text-center text-xs text-white/40" @click="mode = 'signin'; useDifferentEmail()">
+        Back to sign in
+      </button>
+      <button class="w-full text-center text-xs text-white/30" @click="useDifferentEmail">Use a different email</button>
+      <p v-if="error" class="text-center text-xs text-red-300">{{ error }}</p>
+      <p v-if="notice" class="text-center text-xs text-emerald-300">{{ notice }}</p>
+    </div>
+
     <div v-else class="w-full space-y-4">
       <div class="flex rounded-full bg-surface p-1 text-sm">
         <button
@@ -95,7 +164,7 @@ async function forgot() {
           :key="m.id"
           class="flex-1 rounded-full py-1.5 text-white/50"
           :class="mode === m.id && 'bg-surface-2 !text-white'"
-          @click="mode = m.id; error = ''; notice = ''"
+          @click="mode = m.id; error = ''; notice = ''; pendingConfirm = null"
         >
           {{ m.label }}
         </button>
@@ -137,6 +206,18 @@ async function forgot() {
 
       <p v-if="error" class="text-center text-xs text-red-300">{{ error }}</p>
       <p v-if="notice" class="text-center text-xs text-emerald-300">{{ notice }}</p>
+
+      <!-- sign-in blocked on confirmation: offer resend without losing the form -->
+      <div v-if="pendingConfirm && mode === 'signin'" class="rounded-xl border border-amber-400/25 bg-amber-500/10 p-3 text-center">
+        <p class="text-xs text-amber-200">Haven't confirmed <span class="text-white/90">{{ pendingConfirm }}</span> yet?</p>
+        <button
+          class="mt-1.5 text-xs font-semibold text-fuchsia-300 disabled:opacity-40"
+          :disabled="resendCooldown > 0"
+          @click="resend"
+        >
+          {{ resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Resend confirmation email" }}
+        </button>
+      </div>
 
       <div class="pt-1">
         <div class="mb-3 flex items-center gap-3 text-[10px] text-white/30">

@@ -30,14 +30,20 @@ onUnmounted(() => socket.off("dm:new", onNew));
 </script>
 
 <template>
-  <div class="overflow-y-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-6">
-    <h1 class="text-xl font-bold">Messages</h1>
-    <p class="mt-0.5 text-xs text-white/40">Your direct chats</p>
+  <div
+    class="overflow-y-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))] pb-6"
+  >
+    <h1 class="text-xl font-bold">Chat</h1>
 
-    <div v-if="!conversations.length" class="flex flex-col items-center gap-3 py-16 text-center">
+    <div
+      v-if="!conversations.length"
+      class="flex flex-col items-center gap-3 py-16 text-center"
+    >
       <span class="text-5xl">💌</span>
       <p class="text-sm text-white/50">No conversations yet</p>
-      <p class="text-xs text-white/30">Tap someone on the home screen to say hi</p>
+      <p class="text-xs text-white/30">
+        Tap someone on the home screen to say hi
+      </p>
     </div>
 
     <div class="mt-4 space-y-1">
@@ -47,7 +53,13 @@ onUnmounted(() => socket.off("dm:new", onNew));
         :to="`/dms/${c.user.id}`"
         class="flex items-center gap-3 rounded-2xl p-3 transition-colors active:bg-surface"
       >
-        <Avatar :avatar="c.user.avatar" :name="c.user.nickname" :user-id="c.user.id" :frame="c.user.frame" size-class="size-12 text-2xl" />
+        <Avatar
+          :avatar="c.user.avatar"
+          :name="c.user.nickname"
+          :user-id="c.user.id"
+          :frame="c.user.frame"
+          size-class="size-12 text-2xl"
+        />
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold">
             {{ c.user.nickname }}
@@ -57,7 +69,10 @@ onUnmounted(() => socket.off("dm:new", onNew));
               >VIP</span
             >
           </p>
-          <p class="truncate text-xs" :class="c.unread ? 'font-semibold text-white' : 'text-white/40'">
+          <p
+            class="truncate text-xs"
+            :class="c.unread ? 'font-semibold text-white' : 'text-white/40'"
+          >
             {{ c.last.mine ? "You: " : "" }}{{ c.last.text }}
           </p>
         </div>
