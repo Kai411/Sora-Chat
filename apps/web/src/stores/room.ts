@@ -17,11 +17,12 @@ function ensureMusicEl(store: any): HTMLAudioElement {
   if (!musicEl) {
     musicEl = new Audio();
     musicEl.preload = "auto";
-    // Required before the src is ever set: Supabase Storage serves music
-    // cross-origin, and Web Audio processing (below) silently produces no
-    // sound from an unmarked cross-origin element even when the response has
-    // permissive CORS headers.
-    musicEl.crossOrigin = "anonymous";
+    // iOS-only: the Web Audio graph (see applyMusicVolume) silently produces no
+    // sound from an unmarked cross-origin element, so it must be tagged before
+    // src is ever set. Off iOS we play natively and skip this — setting it would
+    // add a CORS requirement that could break playback if a host ever served
+    // music without permissive headers.
+    if (isIOS) musicEl.crossOrigin = "anonymous";
   }
   if (!musicListenersBound) {
     musicListenersBound = true;
@@ -39,16 +40,26 @@ function ensureMusicEl(store: any): HTMLAudioElement {
 
 // Music volume on iOS: <audio>.volume is a documented WebKit no-op — only the
 // hardware buttons control media volume there, so the slider "works" on
-// desktop and silently does nothing on iPhone. Routing through a Web Audio
-// GainNode sidesteps that (iOS does respect gain). Kept as its own
-// AudioContext, entirely separate from the LiveKit voice-boost graph, so
-// disconnecting/reconnecting voice can never affect music playback.
+// desktop and silently does nothing on iPhone. On iOS ONLY we route playback
+// through a Web Audio GainNode (which iOS does respect). Everywhere else the
+// native .volume property works, so we must NOT touch Web Audio there:
+// createMediaElementSource() permanently reroutes the element's output into
+// the AudioContext, and if that context is ever suspended (desktop autoplay
+// policy) the audio simply vanishes — which is exactly what broke desktop
+// playback. Kept as its own context, separate from the LiveKit voice graph.
+const isIOS =
+  typeof navigator !== "undefined" &&
+  (/iP(hone|ad|od)/.test(navigator.userAgent) ||
+    // iPadOS 13+ reports as "MacIntel" but is a touch device.
+    (navigator.platform === "MacIntel" && (navigator.maxTouchPoints ?? 0) > 1));
+
 let musicCtx: AudioContext | null = null;
 let musicGain: GainNode | null = null;
 let musicSource: MediaElementAudioSourceNode | null = null;
 
 function applyMusicVolume(el: HTMLAudioElement, volume: number) {
-  el.volume = volume; // native fallback path; harmless where it's a no-op
+  el.volume = volume; // the only path off iOS — works natively there
+  if (!isIOS) return;
   try {
     if (!musicCtx) {
       const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
@@ -62,12 +73,9 @@ function applyMusicVolume(el: HTMLAudioElement, volume: number) {
       musicSource.connect(musicGain).connect(musicCtx.destination);
     }
     musicGain!.gain.value = volume;
-    // Only silence the native element (handing output to the gain node) once
-    // the context is confirmed running; while suspended, leave it audible at
-    // its native volume so sound isn't lost to a blocked AudioContext.
-    const sync = () => (el.muted = musicCtx!.state === "running");
-    musicCtx.resume().then(sync).catch(() => {});
-    sync();
+    // iOS blocks audio until a user gesture; syncMusic/tapToHearMusic call this
+    // from within one, so resume() succeeds and the graph produces sound.
+    musicCtx.resume().catch(() => {});
   } catch {
     // Web Audio unavailable — native volume above is already applied.
   }
