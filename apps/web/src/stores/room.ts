@@ -57,8 +57,15 @@ let musicCtx: AudioContext | null = null;
 let musicGain: GainNode | null = null;
 let musicSource: MediaElementAudioSourceNode | null = null;
 
+// Music sits under speech: even at a full slider, music output is capped to
+// this fraction so it can't drown out a talking seat (voice runs at full power
+// through its own boosted graph). The slider still reads 0–100% as the user's
+// preference — the ceiling is applied transparently to the actual output.
+const MUSIC_CEILING = 0.7;
+
 function applyMusicVolume(el: HTMLAudioElement, volume: number) {
-  el.volume = volume; // the only path off iOS — works natively there
+  const out = volume * MUSIC_CEILING;
+  el.volume = out; // the only path off iOS — works natively there
   if (!isIOS) return;
   try {
     if (!musicCtx) {
@@ -72,7 +79,7 @@ function applyMusicVolume(el: HTMLAudioElement, volume: number) {
       musicGain = musicCtx.createGain();
       musicSource.connect(musicGain).connect(musicCtx.destination);
     }
-    musicGain!.gain.value = volume;
+    musicGain!.gain.value = out;
     // iOS blocks audio until a user gesture; syncMusic/tapToHearMusic call this
     // from within one, so resume() succeeds and the graph produces sound.
     musicCtx.resume().catch(() => {});
@@ -87,7 +94,13 @@ export type RoomAudioStatus = "off" | "connecting" | "on" | "unavailable";
 // quiet for comfortable listening, so remote voices are routed through a Web
 // Audio gain stage that can amplify past 1.0, with a compressor acting as a
 // limiter so the extra gain doesn't distort loud peaks.
-const VOICE_GAIN = 2.6;
+//
+// Gain is deliberately modest (~+5 dB). The previous 2.6x (+8.3 dB) pushed
+// every voice hard into the limiter — and because all speakers sum into one
+// limiter, several talking at once overshot 0 dBFS and broke up (clipping /
+// pumping). With a lower pre-gain the limiter now only catches genuine peaks
+// (high threshold) instead of crushing normal speech.
+const VOICE_GAIN = 1.8;
 let audioCtx: AudioContext | null = null;
 let limiter: DynamicsCompressorNode | null = null;
 const trackGain = new Map<string, () => void>(); // track sid -> cleanup
@@ -97,9 +110,10 @@ function ensureAudioGraph() {
   const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
   audioCtx = new Ctx();
   limiter = audioCtx.createDynamicsCompressor();
-  limiter.threshold.value = -8;
+  // Peak limiter: leave normal speech untouched, clamp only what nears 0 dBFS.
+  limiter.threshold.value = -3;
   limiter.knee.value = 6;
-  limiter.ratio.value = 12;
+  limiter.ratio.value = 20;
   limiter.attack.value = 0.003;
   limiter.release.value = 0.25;
   limiter.connect(audioCtx.destination);
