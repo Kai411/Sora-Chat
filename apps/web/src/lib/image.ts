@@ -1,8 +1,11 @@
 const MAX_EDGE = 1080;
-// Below this we hand the file through untouched. Base64 inflates ~33%, and the
-// socket caps payloads at 3 MB, so keep some headroom under the server's 2 MB
+// Below this we hand a still image through untouched. Base64 inflates ~33%, and
+// the socket caps payloads at 3 MB, so keep headroom under the server's 2 MB
 // decoded limit.
 const PASSTHROUGH_MAX_BYTES = 1_800_000;
+// Animated files can't be resized without destroying the animation, so they're
+// passed through right up to the server's own limit and rejected there if over.
+const SERVER_MAX_BYTES = 2_000_000;
 
 function readAsDataUrl(file: File): Promise<string | null> {
   return new Promise((resolve) => {
@@ -14,22 +17,51 @@ function readAsDataUrl(file: File): Promise<string | null> {
 }
 
 /**
+ * True for animated WebP (an ANIM/ANMF chunk) or APNG (an acTL chunk). Both
+ * markers live in the container header, so only the first KB is inspected —
+ * scanning further risks false positives inside compressed pixel data.
+ */
+async function isAnimated(file: File): Promise<boolean> {
+  if (file.type !== "image/webp" && file.type !== "image/png") return false;
+  try {
+    const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+    const marker = file.type === "image/webp" ? "ANIM" : "acTL";
+    const codes = [...marker].map((c) => c.charCodeAt(0));
+    outer: for (let i = 0; i <= head.length - codes.length; i++) {
+      for (let k = 0; k < codes.length; k++) if (head[i + k] !== codes[k]) continue outer;
+      return true;
+    }
+  } catch {
+    /* unreadable — treat as still and let the normal path handle it */
+  }
+  return false;
+}
+
+/**
  * Opens the system file picker and returns an image data URL, always in the
  * file's original format (PNG / JPEG / WebP).
  *
- * Small assets — shop frames, avatars, badges — are passed through byte-for-byte,
- * which preserves lossless encoding, alpha and WebP animation that a canvas
- * re-encode would flatten. Anything oversized is downscaled to fit MAX_EDGE and
- * re-encoded in its *own* format, never converted to a different one.
+ * Animated WebP/APNG is never touched — a canvas re-encode would flatten it to
+ * a single frame, so it's passed through byte-for-byte. Small still images are
+ * passed through too (preserving lossless encoding and alpha). Only oversized
+ * stills are downscaled to MAX_EDGE, re-encoded in their *own* format.
  */
 export function pickImage(): Promise<string | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/png,image/jpeg,image/webp";
-    input.onchange = () => {
+    input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return resolve(null);
+
+      // Animation check first: it decides the path regardless of dimensions.
+      if (await isAnimated(file)) {
+        if (file.size <= SERVER_MAX_BYTES) return resolve(await readAsDataUrl(file));
+        // Too large to send intact; the only alternative is flattening it, so
+        // fall through to the canvas path rather than failing the upload.
+      }
+
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = async () => {
